@@ -1,4 +1,6 @@
 import type {
+  CampaignPayload,
+  CampaignResponse,
   CitationGraph,
   CreateRunPayload,
   InteractionGraph,
@@ -102,6 +104,12 @@ export const api = {
       authorities: { key: string; title: string; score: number }[];
       hubs: { key: string; title: string; score: number }[];
     }>(`/api/research/hits?limit=${limit}`),
+
+  campaign: (payload: CampaignPayload) =>
+    request<CampaignResponse>("/api/campaign", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
 
 export function runSocketUrl(runId: string): string {
