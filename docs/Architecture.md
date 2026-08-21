@@ -1,0 +1,228 @@
+---
+title: Architecture
+description: System design of the Markov Agent Orchestrator, covering the decision formalism, stochastic transition kernel, reward decomposition, policy stack, persistence model, and research intelligence layer.
+author: Markov Agent Orchestrator
+ms.date: 2026-08-20
+ms.topic: concept
+keywords:
+  - markov decision process
+  - markov game
+  - multi-agent reinforcement learning
+  - agent orchestration
+  - system architecture
+estimated_reading_time: 18
+---
+
+## Overview
+
+The platform treats agent selection as a sequential decision problem under uncertainty rather than a fixed workflow. A run is an episode: the orchestrator observes a state, samples an action from a policy, observes a stochastic transition, receives a decomposed reward, and repeats until a termination condition fires.
+
+Three properties drive every design choice:
+
+* The successor state is sampled, never computed. Replaying the same action from the same state produces a different outcome.
+* Uncertainty is represented explicitly as a probability distribution, so information gain is a measured quantity rather than a metaphor.
+* Every number displayed in the interface comes from a persisted trace record, so any claim on screen can be traced back to the step that produced it.
+
+## System topology
+
+```mermaid
+flowchart LR
+    subgraph Client["Next.js 14 + React Flow"]
+        Canvas[Agent Workflow Canvas]
+        Metrics[Metrics Panel]
+        Rewards[Reward Dashboard]
+        Traces[Trace Explorer]
+        Library[Research Library]
+    end
+
+    subgraph API["FastAPI"]
+        Meta["/api/meta"]
+        Runs["/api/runs"]
+        Research["/api/research"]
+        Socket["/ws/runs/{id}"]
+    end
+
+    subgraph Core["Orchestration engine"]
+        State[OrchestratorState]
+        Policy[Policy stack]
+        Kernel[TransitionModel]
+        Reward[RewardModel]
+    end
+
+    subgraph Intel["Research intelligence"]
+        Providers[Provider registry]
+        Service[ResearchService]
+    end
+
+    Store[(SQLite / PostgreSQL)]
+
+    Canvas --> Socket
+    Metrics --> Runs
+    Rewards --> Runs
+    Traces --> Runs
+    Library --> Research
+
+    Socket --> Core
+    Runs --> Core
+    Research --> Intel
+
+    Core --> Store
+    Intel --> Store
+```
+
+The frontend holds no simulation logic. It renders persisted state and streams steps over a WebSocket, which means a page refresh never loses an episode.
+
+## The decision formalism
+
+### State S
+
+`OrchestratorState` in [backend/app/orchestration/state.py](../backend/app/orchestration/state.py) carries the full observation. The policy consumes a 12-dimensional feature vector derived from it:
+
+| Feature | Source | Meaning |
+| --- | --- | --- |
+| `bias` | constant | Intercept term for the linear models |
+| `task_complexity` | run config | Difficulty prior sampled at episode start |
+| `uncertainty` | derived | Normalized Shannon entropy of the belief |
+| `budget_remaining` | derived | Fraction of the dollar budget still available |
+| `latency_remaining` | derived | Fraction of the latency budget still available |
+| `confidence` | derived | Posterior mass on the leading hypothesis, shrunk by evidence volume |
+| `memory_coverage` | accumulated | How much relevant prior context has been retrieved |
+| `unresolved_ratio` | accumulated | Open subtasks over total subtasks |
+| `quality` | accumulated | Artifact quality score |
+| `verification_score` | accumulated | Independently verified fraction of the artifact |
+| `mean_agent_success` | Beta posteriors | Average competence across the agent roster |
+| `duplicate_pressure` | accumulated | Recent repeated work with no information gain |
+
+Uncertainty is not a free parameter. The orchestrator maintains a Dirichlet concentration vector over `K` competing solution hypotheses (default 8). Entropy is computed on the posterior mean of that Dirichlet, in bits.
+
+Confidence deserves a note. A posterior can be sharply peaked while resting on almost no evidence, and reporting that as high confidence would be misleading. `confidence_from_belief` shrinks the leading mass toward the uniform prior in proportion to total observed concentration, so confidence rises only when the peak is backed by observations.
+
+### Action space A
+
+Eight actions, defined in [backend/app/orchestration/actions.py](../backend/app/orchestration/actions.py):
+
+* Six single-agent invocations covering Planner, Research, Critic, Verification, Memory, and Executor
+* `RUN_PARALLEL`, which dispatches a coalition of two or three agents
+* `TERMINATE`, which stops the episode and triggers the terminal reward
+
+Two actions are conditionally legal. `RUN_PARALLEL` requires budget and latency headroom. `TERMINATE` is gated behind `min_steps_before_terminate`, because an orchestrator that stops before producing anything is not making a meaningful decision.
+
+### Transition kernel P
+
+[backend/app/orchestration/transitions.py](../backend/app/orchestration/transitions.py) samples the successor state. For each invoked agent:
+
+1. Draw a competence sample from that agent's Beta posterior, discounted by task complexity and residual uncertainty.
+2. Draw a uniform variate to realize one of success, partial, or failure, and record the probability of the branch that was actually taken.
+3. Draw cost, latency, and token consumption from log-normal distributions centered on the agent's baseline.
+4. Fold sampled Dirichlet evidence into the belief. Correct evidence concentrates on the latent hypothesis; incorrect evidence concentrates on a competing one.
+
+Every agent also contributes diffuse Dirichlet noise. The Critic contributes the most, which is deliberate: surfacing an unconsidered failure mode legitimately reopens hypotheses and raises entropy. Information gain is allowed to be negative, and the interface shows that honestly.
+
+The Beta posterior updates after each invocation, so an agent that keeps failing becomes progressively less attractive to every learning policy without any hand-written rule saying so.
+
+```mermaid
+sequenceDiagram
+    participant P as Policy
+    participant E as Engine
+    participant K as TransitionModel
+    participant R as RewardModel
+    participant D as Store
+
+    E->>P: distribution over legal actions
+    P-->>E: sampled action, p(a)
+    E->>K: sample(state, action, rng)
+    K->>K: Beta competence draw
+    K->>K: outcome branch + p(branch)
+    K->>K: log-normal cost, latency, tokens
+    K->>K: Dirichlet evidence update
+    K-->>E: successor state, reports
+    E->>R: compute(prev, outcome, action)
+    R-->>E: per-term breakdown, per-agent credit
+    E->>P: update(s, a, r, s')
+    E->>D: state snapshot, trace, messages
+```
+
+### Reward R
+
+[backend/app/orchestration/rewards.py](../backend/app/orchestration/rewards.py) returns each term separately rather than a scalar:
+
+$$
+R = w_q \Delta q + w_v \Delta v + w_i \big( H_t - H_{t+1} \big) + w_p \rho - w_c \hat{c} - w_l \hat{\ell} - w_d \delta + B_T
+$$
+
+The terms are quality delta, verification delta, information gain in bits, subtask progress, normalized cost, normalized latency, duplicate work, and a terminal bonus. Weights live in `RewardWeights` and are overridable by environment variable.
+
+Keeping the decomposition intact serves three consumers. The reward dashboard renders it directly. The Markov game and MARL policies use per-agent credit shares for their difference-reward signal. Anyone tuning the system can see which term dominates instead of guessing.
+
+The terminal bonus rewards finishing well and penalizes bailing out. Choosing `TERMINATE` with most subtasks still open subtracts value, and running out of budget or latency carries its own penalty.
+
+## Policy stack
+
+All five policies implement the same interface in [backend/app/orchestration/policies/base.py](../backend/app/orchestration/policies/base.py): map a state to a distribution over legal actions, then sample. Sampling rather than taking the argmax keeps exploration visible in the interface and makes the recorded `action_probability` the genuine probability of the branch that was taken.
+
+| Stage | Policy | Mechanism | Limitation it exposes |
+| --- | --- | --- | --- |
+| 0 | `random` | Uniform over legal actions | Control condition |
+| 0 | `heuristic` | Hand-tuned scoring over state features | No learning at all |
+| 1 | `contextual_bandit` | Disjoint LinUCB, one ridge model per action | Optimizes immediate reward; no credit across time |
+| 2 | `mdp` | Tabular Q-learning blended with a linear approximator | Treats the agent roster as a flat action set |
+| 3 | `markov_game` | Per-player values plus learned pairwise synergy over coalitions | Cooperative case only |
+| 4 | `marl` | VDN additive mixing, abstention baselines, difference rewards | Linear function approximation |
+
+Stage 3 is where the framing changes. Agents stop being action labels and become players. Coalition value is the sum of member values plus learned pairwise synergy, minus a coordination cost that scales with budget pressure, so the policy chooses coalition size itself instead of being told when to fan out.
+
+Stage 4 adds a learned abstention baseline per agent, which makes *not* invoking an agent an explicit decision with its own value rather than a silent omission.
+
+## Persistence
+
+The ORM in [backend/app/models.py](../backend/app/models.py) uses only column types that exist in both SQLite and PostgreSQL, so migration is a connection string change.
+
+| Table | Purpose |
+| --- | --- |
+| `runs` | Episode header, totals, and the serialized engine snapshot |
+| `states` | Immutable state snapshot per step |
+| `traces` | Observability record per step |
+| `messages` | Agent-to-agent communication for the interaction graph |
+| `papers` | Research Library records |
+| `paper_tags` | Taxonomy assignments |
+| `citations` | Directed citation graph edges |
+| `provider_queries` | Audit log of research provider calls |
+
+Engines are cached in process for speed, but the database is authoritative. Each step writes a snapshot containing the state, the policy parameters, and the serialized random number generator state. A cache miss rehydrates the engine from that snapshot rather than replaying history, which keeps restore time constant regardless of episode length and preserves the exact random stream.
+
+## Observability
+
+Every step emits a trace containing the state identifier, the predecessor state identifier, the timestamp, the selected action, the selected agents, the policy probability, the realized transition probability, confidence, entropy before and after, information gain, the full reward breakdown, latency, cost, and tokens.
+
+Two distinct probabilities are recorded, and conflating them would hide the most interesting behavior:
+
+* `action_probability` is how likely the policy was to choose that action.
+* `transition_probability` is how likely the environment was to produce the outcome it produced.
+
+A step where the policy confidently chose an action that then failed improbably looks completely different from a step where the policy gambled and got lucky. The trace table distinguishes them.
+
+## Research intelligence layer
+
+Providers implement one contract in [backend/app/research/base.py](../backend/app/research/base.py) and must degrade rather than fail. When the network is unavailable or a call errors, the provider answers from the curated corpus and flags the response as degraded. The interface surfaces that flag instead of silently presenting stale data as live.
+
+| Provider | Contribution |
+| --- | --- |
+| arXiv | Preprint coverage through the public Atom export API |
+| Semantic Scholar | Real citation counts and reference edges |
+| Papers With Code | Which papers have reproducible implementations |
+| `HITSMCPResearchProvider` | External MCP tool server, JSON-RPC `tools/call` |
+| Curated corpus | Offline foundation, always available |
+
+The MCP provider keeps working when no endpoint is configured. It ranks the local corpus using Kleinberg HITS over the citation graph, separating authorities from hubs. That is the same hub and authority signal a remote research tool would supply, computed locally.
+
+`ResearchService` handles fan-out across providers, cross-provider deduplication by normalized title, keyword-signature tagging against the nine-category taxonomy, transparent relevance scoring, and citation graph construction.
+
+## Request flow for a live run
+
+1. The client posts a run configuration and receives the run identifier plus the initial action distribution.
+2. The client opens a WebSocket and sends `start` with a playback interval.
+3. The server steps the engine on the timer, persists the step, and pushes the step plus refreshed run detail.
+4. The canvas animates the message edges, the metrics panel updates entropy and information gain, and the reward dashboard extends its series.
+5. On termination the server emits a terminal event with the reason, and the client stops playback.
+
+`step`, `pause`, `reset`, and `speed` commands are handled on the same socket, so manual stepping and timed playback share one code path and cannot diverge.
