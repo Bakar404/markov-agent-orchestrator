@@ -1,0 +1,31 @@
+// PixelLab MCP server.
+//
+// Verified against https://www.pixellab.ai/mcp and https://api.pixellab.ai/mcp/docs
+// (2026-08-20). The docs give the generic MCP shape:
+//     { "mcpServers": { "pixellab": { "url": ..., "transport": "http", "headers": {...} } } }
+// VS Code's equivalent is "servers" + "type": "http", which is what this file uses.
+// The Claude Code one-liner in the docs is the same thing:
+//     claude mcp add pixellab https://api.pixellab.ai/mcp -t http -H "Authorization: Bearer ..."
+//
+// KNOWN ISSUE: the `edit_map` tool declares `ops: list[PathOp | RectOp]` and ships a JSON
+// Schema with an `array` type but no `items`, which VS Code rejects. Disable `edit_map` via
+// Configure Tools if it blocks registration; nothing here needs map painting.
+//
+// AUTH: the key comes from the PIXELLAB_API_KEY environment variable. It is deliberately NOT
+// written here - this folder is OneDrive-synced, so a plaintext key would sync to the cloud and
+// trip DLP scanning. ${input:...} was tried first but VS Code did not substitute it into the
+// header (requests reached the server with no Authorization at all), so ${env:...} it is.
+//
+// Set it once in PowerShell, then restart VS Code so the new variable is inherited:
+//     [Environment]::SetEnvironmentVariable('PIXELLAB_API_KEY', '<your-key>', 'User')
+{
+  "servers": {
+    "pixellab": {
+      "type": "http",
+      "url": "https://api.pixellab.ai/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:PIXELLAB_API_KEY}"
+      }
+    }
+  }
+}

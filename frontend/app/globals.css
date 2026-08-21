@@ -1,0 +1,184 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --grid: rgba(59, 53, 107, 0.28);
+}
+
+* {
+  border-radius: 0 !important;
+}
+
+html,
+body {
+  height: 100%;
+  background: #07060f;
+  color: #d8d4ff;
+  font-family: theme("fontFamily.mono");
+  -webkit-font-smoothing: none;
+  font-smooth: never;
+}
+
+/* Every raster asset stays chunky when scaled. */
+img,
+canvas,
+svg {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+@layer components {
+  .crt {
+    position: relative;
+  }
+
+  /* Scanline overlay. Pointer-events off so it never eats clicks. */
+  .crt::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.22) 0px,
+      rgba(0, 0, 0, 0.22) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    mix-blend-mode: multiply;
+  }
+
+  .crt::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 59;
+    pointer-events: none;
+    background: radial-gradient(
+      ellipse at center,
+      transparent 55%,
+      rgba(0, 0, 0, 0.55) 100%
+    );
+  }
+
+  .grid-bg {
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+
+  .panel {
+    @apply border-2 border-edge bg-slab/80 shadow-pixel;
+  }
+
+  .panel-tight {
+    @apply border-2 border-edge bg-slab/80 shadow-pixel-sm;
+  }
+
+  .pixel-btn {
+    @apply border-2 border-edge bg-slabLight px-3 py-2 font-pixel text-2xs uppercase
+           tracking-wider text-phosphor shadow-pixel-sm transition-none;
+  }
+
+  .pixel-btn:hover:not(:disabled) {
+    @apply -translate-x-[1px] -translate-y-[1px] bg-edge text-void shadow-pixel;
+  }
+
+  .pixel-btn:active:not(:disabled) {
+    @apply translate-x-[2px] translate-y-[2px] shadow-none;
+  }
+
+  .pixel-btn:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+
+  .pixel-btn-primary {
+    @apply border-phosphor bg-phosphor text-void;
+  }
+
+  .pixel-btn-danger {
+    @apply border-crimson text-crimson;
+  }
+
+  .stat-label {
+    @apply font-pixel text-3xs uppercase tracking-widest text-edge;
+  }
+
+  .stat-value {
+    @apply font-mono text-sm tabular-nums text-phosphor;
+  }
+
+  /* Chunky segmented meter used for HP-style bars. */
+  .meter {
+    @apply relative h-3 w-full border-2 border-edge bg-ink;
+  }
+
+  .meter-fill {
+    @apply h-full transition-[width] duration-200 ease-linear;
+    background-image: repeating-linear-gradient(
+      90deg,
+      currentColor 0px,
+      currentColor 4px,
+      rgba(0, 0, 0, 0.35) 4px,
+      rgba(0, 0, 0, 0.35) 6px
+    );
+  }
+
+  .dither {
+    background-image: radial-gradient(rgba(123, 247, 196, 0.14) 1px, transparent 1px);
+    background-size: 4px 4px;
+  }
+}
+
+/* Scrollbars, arcade flavoured */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b0a14;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3b356b;
+  border: 2px solid #0b0a14;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #7bf7c4;
+}
+
+/* React Flow overrides so the graph matches the arcade shell. */
+.react-flow__background {
+  background-color: #07060f;
+}
+
+.react-flow__edge-path {
+  stroke-linecap: butt;
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+.react-flow__handle {
+  border: 0;
+  background: #3b356b;
+  width: 6px;
+  height: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
