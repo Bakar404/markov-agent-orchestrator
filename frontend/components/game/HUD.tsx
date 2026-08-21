@@ -17,7 +17,7 @@ function Meter({
     <div>
       <div className="flex items-baseline justify-between gap-2">
         <span className="stat-label">{label}</span>
-        <span className="font-mono text-3xs tabular-nums" style={{ color }}>
+        <span className="font-mono text-2xs tabular-nums" style={{ color }}>
           {display}
         </span>
       </div>
@@ -111,7 +111,7 @@ export function HUD() {
       {lastStep ? (
         <div className="border-2 border-edge bg-ink px-2 py-2">
           <p className="stat-label">Information gain</p>
-          <p className="mt-1 font-mono text-3xs leading-relaxed text-[#8f89c9]">
+          <p className="mt-1 font-mono text-2xs leading-relaxed text-mist">
             H(before) {lastStep.entropy_before.toFixed(4)} − H(after){" "}
             {lastStep.entropy_after.toFixed(4)} ={" "}
             <span className={gain >= 0 ? "text-lime" : "text-crimson"}>

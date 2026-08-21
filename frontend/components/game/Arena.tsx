@@ -124,13 +124,13 @@ export function Arena() {
 
             <p
               className="font-pixel text-3xs"
-              style={{ color: active ? agent.color : "#5b5691" }}
+              style={{ color: active ? agent.color : "#a49edb" }}
             >
               {agent.label.replace(" Agent", "").toUpperCase()}
             </p>
 
             {history ? (
-              <p className="font-mono text-3xs text-edge">
+              <p className="font-mono text-2xs text-muted">
                 x{history.invocations} · {(history.success_rate * 100).toFixed(0)}%
               </p>
             ) : null}
@@ -140,7 +140,7 @@ export function Arena() {
 
       {lastStep ? (
         <div className="absolute bottom-0 left-0 right-0 z-30 border-t-2 border-edge bg-ink/90 px-3 py-2">
-          <p className="font-mono text-3xs text-[#8f89c9]">
+          <p className="font-mono text-2xs text-mist">
             <span className="text-amber">STEP {lastStep.step}</span> · {lastStep.action_label} ·{" "}
             <span
               className={

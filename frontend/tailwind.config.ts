@@ -15,7 +15,10 @@ const config: Config = {
         ink: "#0b0a14",
         slab: "#171531",
         slabLight: "#221f42",
+        // Border tone only. It fails contrast as a text colour - use muted/mist for text.
         edge: "#3b356b",
+        muted: "#cfcaf5",
+        mist: "#e6e3ff",
         phosphor: "#7bf7c4",
         magenta: "#ff5fd2",
         amber: "#ffc857",
@@ -38,8 +41,8 @@ const config: Config = {
         mono: ["'IBM Plex Mono'", "ui-monospace", "Consolas", "monospace"],
       },
       fontSize: {
-        "2xs": ["0.5rem", { lineHeight: "1.1rem" }],
-        "3xs": ["0.4rem", { lineHeight: "0.9rem" }],
+        "2xs": ["0.65rem", { lineHeight: "1.25rem" }],
+        "3xs": ["0.55rem", { lineHeight: "1.1rem" }],
       },
       boxShadow: {
         pixel: "4px 4px 0 0 #07060f",

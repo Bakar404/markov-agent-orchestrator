@@ -117,9 +117,14 @@ export default function ResearchPage() {
               : "Loading…"}
           </p>
         </div>
-        <Link href="/" className="font-pixel text-3xs text-violet hover:text-phosphor">
-          ◂ ORCHESTRATOR
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/campaign" className="font-pixel text-3xs text-cyan hover:text-phosphor">
+            LEARNING ▸
+          </Link>
+          <Link href="/" className="font-pixel text-3xs text-violet hover:text-phosphor">
+            ◂ ORCHESTRATOR
+          </Link>
+        </div>
       </header>
 
       {error ? (

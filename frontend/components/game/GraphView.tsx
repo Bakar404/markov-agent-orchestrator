@@ -124,7 +124,7 @@ export function GraphView() {
         target: edge.target,
         animated: live,
         label: `${edge.count}× p̄=${edge.mean_weight.toFixed(2)}`,
-        labelStyle: { fill: "#8f89c9", fontSize: 8, fontFamily: "IBM Plex Mono, monospace" },
+        labelStyle: { fill: "#e6e3ff", fontSize: 10, fontFamily: "IBM Plex Mono, monospace" },
         labelBgStyle: { fill: "#0b0a14" },
         style: {
           stroke: live ? "#7bf7c4" : isReport ? "#a78bfa" : "#3b356b",

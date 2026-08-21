@@ -15,10 +15,15 @@ html,
 body {
   height: 100%;
   background: #07060f;
-  color: #d8d4ff;
+  color: #eceaff;
   font-family: theme("fontFamily.mono");
   -webkit-font-smoothing: none;
   font-smooth: never;
+}
+
+/* Scales every rem-based size at once so the arcade shell reads at arm's length. */
+html {
+  font-size: 17px;
 }
 
 /* Every raster asset stays chunky when scaled. */
@@ -105,11 +110,11 @@ svg {
   }
 
   .stat-label {
-    @apply font-pixel text-3xs uppercase tracking-widest text-edge;
+    @apply font-pixel text-3xs uppercase tracking-widest text-muted;
   }
 
   .stat-value {
-    @apply font-mono text-sm tabular-nums text-phosphor;
+    @apply font-mono text-base tabular-nums text-phosphor;
   }
 
   /* Chunky segmented meter used for HP-style bars. */
@@ -134,12 +139,19 @@ svg {
   }
 }
 
+@layer utilities {
+  /* `edge` is the border tone and scores 1.6:1 as text. Every text-edge call site is a
+     dim label, so resolve the utility to the readable tint rather than touching ~40 files. */
+  .text-edge {
+    color: theme("colors.muted");
+  }
+}
+
 /* Scrollbars, arcade flavoured */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
-
 ::-webkit-scrollbar-track {
   background: #0b0a14;
 }

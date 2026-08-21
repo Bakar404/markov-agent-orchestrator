@@ -37,6 +37,9 @@ export default function Page() {
           <p className="mt-1 max-w-3xl font-mono text-3xs text-[#8f89c9]">{run.task}</p>
         </div>
         <div className="flex items-center gap-4">
+          <Link href="/campaign" className="font-pixel text-3xs text-cyan hover:text-phosphor">
+            LEARNING ▸
+          </Link>
           <Link href="/research" className="font-pixel text-3xs text-violet hover:text-phosphor">
             RESEARCH ▸
           </Link>

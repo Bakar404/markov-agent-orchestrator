@@ -19,14 +19,20 @@ import {
 import { PixelSprite } from "@/components/pixel/PixelSprite";
 import { useGame } from "@/lib/store";
 
-const AXIS = { stroke: "#3b356b", fontSize: 9, fontFamily: "IBM Plex Mono, monospace" };
+const AXIS = {
+  stroke: "#8b84c9",
+  tick: { fill: "#e6e3ff", fontSize: 12, fontFamily: "IBM Plex Mono, monospace" },
+};
+
+const GRID = "#332f60";
 
 const TOOLTIP_STYLE = {
   backgroundColor: "#0b0a14",
-  border: "2px solid #3b356b",
+  border: "2px solid #8b84c9",
   borderRadius: 0,
+  color: "#e6e3ff",
   fontFamily: "IBM Plex Mono, monospace",
-  fontSize: 11,
+  fontSize: 13,
 };
 
 const TERM_COLORS: Record<string, string> = {
@@ -96,12 +102,12 @@ export function RewardDashboard() {
 
       <Panel title="CUMULATIVE REWARD">
         <ResponsiveContainer width="100%" height={180}>
-          <LineChart data={series} margin={{ top: 4, right: 8, bottom: 0, left: -18 }}>
-            <CartesianGrid stroke="#221f42" strokeDasharray="2 2" />
+          <LineChart data={series} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
+            <CartesianGrid stroke={GRID} strokeDasharray="2 2" />
             <XAxis dataKey="step" {...AXIS} />
             <YAxis {...AXIS} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} />
-            <ReferenceLine y={0} stroke="#3b356b" />
+            <Tooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: "#e6e3ff" }} />
+            <ReferenceLine y={0} stroke="#8b84c9" />
             <Line
               type="stepAfter"
               dataKey="cumulative_reward"
@@ -129,12 +135,12 @@ export function RewardDashboard() {
       <div className="grid gap-3 lg:grid-cols-2">
         <Panel title="ENTROPY &amp; INFORMATION GAIN">
           <ResponsiveContainer width="100%" height={170}>
-            <AreaChart data={series} margin={{ top: 4, right: 8, bottom: 0, left: -18 }}>
-              <CartesianGrid stroke="#221f42" strokeDasharray="2 2" />
+            <AreaChart data={series} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
+              <CartesianGrid stroke={GRID} strokeDasharray="2 2" />
               <XAxis dataKey="step" {...AXIS} />
               <YAxis {...AXIS} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <ReferenceLine y={0} stroke="#3b356b" />
+              <Tooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: "#e6e3ff" }} />
+              <ReferenceLine y={0} stroke="#8b84c9" />
               <Area
                 type="monotone"
                 dataKey="entropy_after"
@@ -161,12 +167,12 @@ export function RewardDashboard() {
 
         <Panel title="REWARD DECOMPOSITION">
           <ResponsiveContainer width="100%" height={170}>
-            <BarChart data={termData} margin={{ top: 4, right: 8, bottom: 0, left: -18 }}>
-              <CartesianGrid stroke="#221f42" strokeDasharray="2 2" />
+            <BarChart data={termData} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
+              <CartesianGrid stroke={GRID} strokeDasharray="2 2" />
               <XAxis dataKey="term" {...AXIS} tickFormatter={(t: string) => t.slice(0, 4)} />
               <YAxis {...AXIS} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <ReferenceLine y={0} stroke="#3b356b" />
+              <Tooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: "#e6e3ff" }} />
+              <ReferenceLine y={0} stroke="#8b84c9" />
               <Bar dataKey="value" isAnimationActive={false}>
                 {termData.map((entry) => (
                   <Cell key={entry.term} fill={TERM_COLORS[entry.term] ?? "#a78bfa"} />

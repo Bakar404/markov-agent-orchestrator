@@ -38,7 +38,7 @@ function Distribution({ trace }: { trace: Trace }) {
                 className="meter-fill"
                 style={{
                   width: `${(probability / peak) * 100}%`,
-                  color: chosen ? "#7bf7c4" : "#3b356b",
+                  color: chosen ? "#7bf7c4" : "#6f68ab",
                 }}
               />
             </div>

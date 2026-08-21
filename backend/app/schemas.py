@@ -60,6 +60,20 @@ class ResearchDiscoverRequest(BaseModel):
     limit_per_query: int = Field(6, ge=1, le=25)
 
 
+class CampaignRequest(BaseModel):
+    """Paired carried-vs-fresh learning experiment."""
+
+    policies: list[str] | None = Field(
+        None,
+        description="Policy ids to compare. Defaults to the four learning stages.",
+    )
+    episodes: int = Field(40, ge=2, le=200, description="Episodes per arm, per policy.")
+    seed_base: int = Field(1000, ge=0, le=2**31 - 1)
+    max_steps: int = Field(40, ge=5, le=200)
+    budget_usd: float = Field(1.20, gt=0.0, le=100.0)
+    task_complexity: float = Field(0.55, ge=0.05, le=0.99)
+
+
 class RunSummary(BaseModel):
     id: str
     task: str

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { PixelSprite } from "@/components/pixel/PixelSprite";
 import { useGame } from "@/lib/store";
@@ -103,6 +104,15 @@ export function TitleScreen() {
         ) : (
           <p className="font-pixel text-3xs text-edge">INSERT COIN · V0.1 · 2026</p>
         )}
+
+        <nav className="flex items-center gap-5">
+          <Link href="/campaign" className="font-pixel text-3xs text-cyan hover:text-phosphor">
+            LEARNING LAB ▸
+          </Link>
+          <Link href="/research" className="font-pixel text-3xs text-violet hover:text-phosphor">
+            RESEARCH ▸
+          </Link>
+        </nav>
       </main>
     );
   }
