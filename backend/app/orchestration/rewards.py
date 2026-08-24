@@ -113,7 +113,9 @@ class RewardModel:
         completion = 1.0 - state.unresolved_ratio
         value = readiness * (0.35 + 0.65 * completion)
 
-        if action is Action.TERMINATE and state.unresolved_ratio > 0.5:
+        # Continuous in what was left undone. A threshold here is worse than no penalty at
+        # all: policies learn to resolve just past it and bail, which is what they did.
+        if action is Action.TERMINATE:
             value -= 0.45 * state.unresolved_ratio
         if state.termination_reason == "budget_exhausted":
             value -= 0.35
