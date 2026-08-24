@@ -1,64 +1,166 @@
 ---
 title: Markov Agent Orchestrator
-description: A pixel-art arena where multi-agent orchestration is treated as a stochastic decision problem, evolving from contextual bandits through cooperative Markov games to multi-agent reinforcement learning.
+description: An experiment harness that answers whether multi-agent orchestration beats a single agent on your task, with a pixel-art arena that shows the decisions being made and paid for.
 ---
 
 # Markov Agent Orchestrator
 
-Most multi-agent frameworks hard-code the workflow: planner, then researcher, then critic, then done. This one treats "which agent should act next" as a **sequential decision problem under uncertainty** and learns the answer.
+Most multi-agent frameworks assume the answer. They hard-code a workflow — planner, then researcher, then critic — and never ask whether any of it beat one agent doing the work alone.
 
-The orchestrator maintains an explicit Dirichlet belief over competing solution hypotheses, samples an action from a policy, observes a genuinely stochastic transition, and accumulates a decomposed reward. Then it renders the whole thing as a playable pixel-art game.
+This asks. One generalist starts the task; if it stalls, a policy decides whether to **escalate** into orchestration. Every arm is measured against a single-agent control on the same seeds. Then it renders the whole thing as a playable pixel-art game, so you can watch orchestration being bought.
 
 ```text
-      ┌─ Planner ─┐                    entropy fog clears as the belief sharpens
-Research      Critic          ◄──►     agents ring a central core
-      └─ Verifier ┘                    each invocation is a sampled outcome
+        ◇ solo                     one agent, no routing decision
+        ↓ escalate?                the decision under uncertainty
+  ┌─ Planner ─┐                    specialists appear only once bought
+Research   Critic         ◄──►     entropy fog clears as the belief sharpens
+  └─ Verifier ┘                    every number traces to a persisted step
 ```
+
+## The question it answers
+
+> Is your multi-agent setup actually better than one agent — and by how much, at what cost?
+
+Run a control arm and one or more strategy arms on the same task and seeds. The comparison pairs on seeds, reports differences with standard errors, and **refuses to rank arms on internal reward**: that metric pays for belief collapse, which a single-agent control never attempts, so ranking on it would let orchestration win by construction.
+
+Cost, latency and tokens are measured. Quality is not — it comes from a `verdict` you record, because nothing inside the reward function can tell you whether the answer got better.
 
 ## Why this exists
 
 Three properties drive every design choice:
 
-* The successor state is **sampled, never computed**. Replaying the same action from the same state lands somewhere else.
+* The successor state is **sampled, never computed**. Replaying the same action from the same state lands somewhere else. In live mode the outcome is not sampled at all — it is whatever a real agent actually produced.
 * Uncertainty is a **probability distribution**, so information gain is measured in bits rather than asserted.
 * Every number on screen comes from a **persisted trace**, so any claim in the UI can be traced to the step that produced it.
 
-## The measured result
+## The escalation gate
 
-The policy stack spans five implementations. The interesting question is whether the sophisticated ones earn their complexity, so [backend/tools/campaign.py](backend/tools/campaign.py) runs each policy twice over identical task instances — once carrying learned parameters between episodes, once starting fresh — and reports the paired difference.
+A run starts solo. `ESCALATE` is the only other legal action until it fires, after which the specialists unlock. That makes "should I orchestrate at all" the first decision under uncertainty rather than an assumption.
+
+40 episodes, identical seeds and budget:
+
+| Strategy | Policy | Reward | Win | Escalated | At step |
+| --- | --- | --- | --- | --- | --- |
+| `control` | `single_agent` | −9.44 | 2% | **0%** | — |
+| `cascade` | `heuristic` | −3.62 | 0% | **62%** | 5.0 |
+| `always_orchestrate` | `fixed_sequence` | **+4.24** | **12%** | 100% | 2.0 |
+| — | `contextual_bandit` | +2.84 | 0% | 100% | 2.0 |
+| — | `mdp` | +1.21 | 2% | 100% | 3.0 |
+| — | `marl` | +0.91 | 0% | 100% | 3.1 |
+
+**Every learned policy pins the gate at 100%.** Only the hand-written cascade uses it selectively, and only the hardcoded pipeline wins. The learned policies did not learn a gate; they learned "always", which is one of the two bookends they were supposed to beat.
+
+That is the open problem this repository is currently pointed at. It is stated here rather than buried, because the harness is what found it.
+
+## The carried-learning result
+
+A separate question: do the learned policies improve by carrying parameters between episodes? [backend/tools/campaign.py](backend/tools/campaign.py) runs each policy twice over identical task instances — once carrying learned parameters, once starting fresh — and reports the paired difference.
 
 | Policy | Stage | Δ carried − fresh | Reward trend across thirds |
 | --- | --- | --- | --- |
-| `contextual_bandit` | 1 | **−0.80 ± 0.26** ✱ | +2.17 → +2.20 → +1.93 |
-| `mdp` | 2 | **+1.07 ± 0.44** ✱ | +0.51 → +2.56 → +2.48 |
-| `markov_game` | 3 | +0.60 ± 0.38 | +0.40 → +1.10 → +1.97 |
-| `marl` | 4 | **+1.13 ± 0.36** ✱ | +0.62 → +2.08 → +1.86 |
+| `contextual_bandit` | 1 | **−0.56 ± 0.24** ✱ | +2.00 → +2.49 → +2.59 |
+| `mdp` | 2 | **+1.47 ± 0.47** ✱ | +0.74 → +2.87 → +2.88 |
+| `markov_game` | 3 | **+0.82 ± 0.39** ✱ | −0.04 → +1.92 → +2.08 |
+| `marl` | 4 | **+1.05 ± 0.37** ✱ | +0.12 → +1.88 → +2.48 |
 | `random` | control | 0.00 ± 0.00 | flat |
 
 ✱ exceeds two standard errors. 40 episodes per arm.
 
-Two things worth reading twice. The contextual bandit gets **significantly worse** when it carries learning: LinUCB's ridge matrices accumulate, its exploration bonus shrinks, and it locks onto arm values fitted to task instances that no longer apply. That is stage-1 myopia showing up as a measured regression rather than a footnote.
+Two things worth reading twice. The contextual bandit gets **significantly worse** when it carries learning — stage-1 myopia showing up as a measured regression rather than a footnote. And `random` returns *exactly* zero with zero variance, which is the control working: a policy with no state to carry must produce identical arms, and it does.
 
-And `random` returns *exactly* zero with zero variance, which is the control working: a policy with no state to carry must produce identical arms, and it does.
+### Why the bandit degrades
+
+The obvious explanation is that carried arm values stop matching the task instances in front of them. That explanation is wrong, and the harness can show it.
+
+`--shape-spread` varies how each episode is shaped — how much it depends on external evidence, on producing artifacts, on being verifiably correct — while keeping the carried and fresh arms on identical instances. If the problem were mismatched instances, making instances genuinely differ should hurt both arms alike.
+
+| Policy | spread 0.0 | spread 0.4 |
+| --- | --- | --- |
+| `contextual_bandit` | −0.56 ± 0.24 | **−1.20 ± 0.31** |
+| `mdp` | +1.47 ± 0.47 | +1.36 ± 0.47 |
+| `markov_game` | +0.82 ± 0.39 | **+1.20 ± 0.39** |
+| `marl` | +1.05 ± 0.37 | +1.08 ± 0.32 |
+| `random` | 0.00 ± 0.00 | 0.00 ± 0.00 |
+
+The bandit's regression more than doubles. The decisive detail is *which arm moves*: its fresh arm is flat (2.89 → 2.90) while its carried arm collapses (2.33 → 1.70). Varied instances do not make the problem harder — they make **carrying** harmful.
+
+The mechanism is exploration, not stale values. LinUCB's exploration bonus is `α·√(xᵀA⁻¹x)`, and `A` only ever accumulates, so carrying it shrinks exploration monotonically across episodes — precisely when heterogeneous tasks demand more of it. The fresh arm resets `A` every episode and keeps exploring.
+
+`markov_game` gains +0.38 from the same variation, so the task-shape context is genuinely informative. It is the bandit that cannot use it.
+
+**Consequence:** never give `contextual_bandit` a persistent policy profile.
+
+### Routing that persists
+
+A run builds a fresh policy by default, so nothing learned survives the episode that taught it. A **policy profile** lifts those parameters out: train one in simulation, then load it to route real work.
+
+```powershell
+# train, then reuse under the name "router"
+curl -X POST http://localhost:8000/api/runs -H "Content-Type: application/json" `
+  -d '{"task":"...","policy":"marl","policy_profile":"router"}'
+
+curl http://localhost:8000/api/profiles          # inspect
+curl -X DELETE http://localhost:8000/api/profiles `
+  -H "Content-Type: application/json" -d '{"name":"router","policy":"marl"}'
+```
+
+Profiles are keyed by name **and** policy, and each records the context signature it was fitted for. LinUCB stores a `d×d` ridge matrix per action, so loading weights fitted against a different feature vector would corrupt the policy rather than merely stale it; a mismatch raises instead.
 
 ## The policy stack
 
 | Stage | Policy | Mechanism | The limitation it exposes |
 | --- | --- | --- | --- |
 | 0 | `random`, `heuristic` | Uniform / hand-tuned scoring | No learning at all |
-| 1 | `contextual_bandit` | Disjoint LinUCB over a 12-dimensional state context | Optimizes immediate reward; no credit across time |
+| 1 | `contextual_bandit` | Disjoint LinUCB over a 15-dimensional state context | Optimizes immediate reward; no credit across time |
 | 2 | `mdp` | Tabular Q-learning plus a linear approximator, Boltzmann exploration | Agents are flat action labels |
 | 3 | `markov_game` | Per-player values plus a learned pairwise synergy matrix | Cooperative case only |
 | 4 | `marl` | VDN additive mixing, abstention baselines, difference rewards | Linear function approximation |
 
 Stage 3 is where the framing changes: agents stop being action labels and become players. Coalition value is the sum of member values plus learned synergy, so the policy chooses **how many agents to fan out to**, rather than being told.
 
+## Strategies: the arm catalog
+
+A **strategy** is a policy plus the configuration that makes it a coherent approach, linked to the part of the research taxonomy that motivates it. Picking an arm means picking a published idea to test against your own baseline, so the library stops being a reference shelf and becomes the menu.
+
+| Strategy | Escalates | What it is |
+| --- | --- | --- |
+| `control` | never | One generalist, no routing. Always include it |
+| `cascade` | on stall | Solo until progress stalls, then escalate |
+| `always_orchestrate` | immediately | Hardcoded specialist rotation |
+| `learned_bandit` | learned | LinUCB over the state context |
+| `learned_mdp` | learned | Q-learning with a linear approximator |
+| `learned_markov_game` | learned | Per-player values plus learned synergy |
+| `learned_marl` | learned | VDN mixing with difference rewards |
+
+`GET /api/meta` returns the catalog; `POST /api/runs` accepts a `strategy` id and derives the policy, its options and the arm name.
+
+## User workflow
+
+```mermaid
+flowchart TD
+    A[State your task] --> B[Pick arms]
+    R[(Research library)] -->|strategy backed by a paper| B
+    B --> C{Which mode?}
+    C -->|simulated| D[Many seeds, free, fast]
+    C -->|live| E[Your real agents report in]
+    D --> F[Score each run: verdict]
+    E --> F
+    F --> G[Compare: paired deltas + verdict]
+    G --> H{Significant?}
+    H -->|no| I[Add seeds]
+    H -->|yes| J[Inspect the arena trace: why]
+    I --> C
+```
+
+Explore in simulation, confirm live. A live step costs real time and credits, so a three-arm five-seed experiment is only affordable in simulation; use live runs to confirm a shape you already found.
+
 ## What you get
 
-* **Arena** — pixel sprites ringed around the core, entropy rendered as fog that clears as the belief sharpens, damage-number reward popups, combo counter, HP-style meters.
+* **Compare** — the destination: arms side by side, paired on seeds, with standard errors and an explicit verdict sentence that refuses to overclaim.
+* **Arena** — one agent until the policy escalates, then specialists appear on the ring. Entropy rendered as fog that clears as the belief sharpens, damage-number reward popups, HP-style meters.
 * **Graph** — React Flow interaction graph where edge width is message volume and labels carry the mean probability weight.
 * **Rewards** — cumulative and per-step reward, entropy against information gain, the full reward decomposition, per-agent contribution with cost efficiency.
-* **Traces** — every step, expandable into the policy's action distribution, the reward breakdown and the state transition.
+* **Traces** — every step, expandable into the policy's action distribution, the reward breakdown, the state transition and the real agent output in live mode.
 * **Research Library** — 43 curated papers, 81 citation edges, a nine-category taxonomy, and live search across arXiv, Semantic Scholar, Papers With Code and an MCP tool provider.
 
 ## Quick start
@@ -84,15 +186,70 @@ Open <http://localhost:3000> and press start. Or run both with `.\scripts\dev.ps
 > [!TIP]
 > Do not run `npm run build` while `npm run dev` is live. They share `.next`, and the production build wipes the dev server's chunks.
 
-## The agents are simulated
+## Two modes: simulated and live
 
-The six agents are stochastic processes, not language model calls. Each is a parameter set covering cost, latency, token draw, a Beta competence prior, evidence strength and noise; the transition kernel samples from those distributions.
+**Sim mode** is the default. The six agents are stochastic processes, not language model calls — each is a parameter set covering cost, latency, token draw, a Beta competence prior, evidence strength and noise, and the transition kernel samples from those distributions.
 
-No model SDK is used and no API key is required, so an episode costs nothing and is reproducible from its seed. **Token and dollar figures in the UI are sampled quantities, not billed ones.**
+No model SDK is used and no API key is required, so an episode costs nothing and is reproducible from its seed. **Token and dollar figures are sampled quantities, not billed ones.**
 
-That is deliberate. Policy learning needs thousands of episodes, and paying for inference on each would make the research loop unaffordable and non-reproducible. The simulation sits behind a single `AgentReport` contract so it can be swapped for live execution without touching the decision layer — see stage 5 in [docs/ResearchRoadmap.md](docs/ResearchRoadmap.md), including the two fields that have no ground truth outside simulation.
+That is deliberate. Policy learning needs thousands of episodes, and paying for inference on each would make the research loop unaffordable and non-reproducible.
 
-The only outbound calls belong to the research providers, and all of them fall back to a local corpus when offline.
+**Live mode** removes the simulation. The policy still decides *who acts*; a real agent decides *what that agent produces*. A step is split in two so a model can sit in the middle:
+
+| Call | Effect |
+| --- | --- |
+| `POST /api/runs/{id}/live/open` | The policy picks the action and agents, and returns their briefs. **Does not advance the run.** |
+| `POST /api/runs/{id}/live/report` | Real output is folded in and the episode advances one step |
+
+Cost, latency and token counts stop being drawn and start being measured. Reports flow through the same transition kernel, reward decomposition and persistence as sim mode, so nothing downstream changes.
+
+There is no play button in live mode, and that is not a limitation. Pacing is the conversation, so every call is one you asked for.
+
+> [!IMPORTANT]
+> Live mode has no ground truth. Sim mode grades evidence against a hidden `latent_hypothesis`; a real task has no such label. Live reports carry a `claimed_hypothesis` instead, so belief mass follows what each agent argued for and **confidence only rises when independent agents agree**. An agent that confidently asserts nonsense will move the belief until the Verifier disputes it.
+
+The only other outbound calls belong to the research providers, and all of them fall back to a local corpus when offline.
+
+## Running an experiment
+
+An experiment is a set of runs sharing an `experiment` name, split into `arm`s, on the **same seeds**. One arm must be called `control`.
+
+```powershell
+# same seed, one arm per strategy
+foreach ($seed in 101..105) {
+  foreach ($arm in 'control','cascade','always_orchestrate') {
+    $body = @{ task='<your task>'; strategy=$arm; arm=$arm; seed=$seed
+               experiment='worth-it'; max_steps=12 } | ConvertTo-Json
+    $run = Invoke-RestMethod http://localhost:8000/api/runs -Method Post `
+             -Body $body -ContentType 'application/json'
+    Invoke-RestMethod "http://localhost:8000/api/runs/$($run.id)/step" -Method Post `
+      -Body (@{steps=12}|ConvertTo-Json) -ContentType 'application/json' | Out-Null
+
+    # quality cannot be measured, only judged
+    Invoke-RestMethod "http://localhost:8000/api/runs/$($run.id)/verdict" -Method Post `
+      -Body (@{score=0.7; rubric='correctness + specificity'}|ConvertTo-Json) `
+      -ContentType 'application/json' | Out-Null
+  }
+}
+```
+
+Then open `/compare`, or `GET /api/experiments/worth-it`. The response carries per-arm means, paired deltas against the control with standard errors, a one-line `verdict`, and `caveats` that call out thin evidence, unjudged arms and a missing control.
+
+What it will not do is rank arms on internal reward. If you want a number that says orchestration won, you have to supply a verdict.
+
+## Driving a live run from your agent
+
+The backend does not call a model — it is called *by* one. Anything that can make HTTP requests can drive it; [.github/copilot-instructions.md](.github/copilot-instructions.md) carries the protocol, which the GitHub Copilot CLI reads automatically.
+
+```powershell
+.\scripts\dev.ps1        # backend + frontend
+cd c:\src\markov-agent-orchestrator
+copilot                  # then: "run the arena on <your task>"
+```
+
+The agent creates the run, calls `live/open`, does the work the brief describes, and reports back. Open the printed `http://localhost:3000/?run=<id>` to watch it arrive — REST-driven steps are broadcast to spectators over the WebSocket, so the arena updates without driving anything itself.
+
+Live steps cost real time and real credits, which is the point: the numbers on screen are billed, not sampled.
 
 ## Research Intelligence Layer
 
@@ -112,13 +269,14 @@ The MCP provider stays useful with no endpoint configured — it ranks the local
 
 ```text
 backend/
-  app/orchestration/   State, actions, stochastic transitions, rewards, policies, engine
+  app/orchestration/   State, actions, escalation, transitions, rewards, policies, strategies
   app/research/        Provider abstraction + arXiv / Semantic Scholar / PwC / HITS MCP
   app/api/             REST + WebSocket routers
+  app/services/        Run lifecycle, experiments, policy profiles, spectator hub
   tools/               balance.py (single-episode probe), campaign.py (cross-episode)
-  tests/               39 tests
+  tests/               122 tests
 frontend/
-  app/                 Title screen, orchestrator arena, research library
+  app/                 Title screen, arena, compare, campaign, research library
   components/game/     Arena, HUD, Controls, GraphView, RewardDashboard, TraceExplorer
   components/pixel/    Sprite renderer with animation playback
 docs/                  Architecture, ResearchRoadmap, DesignDecisionLog
@@ -130,16 +288,38 @@ scripts/               dev.ps1, fetch-sprites.ps1
 
 ```powershell
 cd backend
-python -m pytest -q                                  # 39 tests
+python -m pytest -q                                  # 122 tests
 python -m tools.balance --episodes 40                # single-episode balance
 python -m tools.campaign --episodes 40               # cross-episode learning
+python -m tools.campaign --episodes 40 --shape-spread 0.4   # varied task instances
 ```
 
 The balance harness exists because playing the game revealed what the tests could not: the win condition was originally unreachable in 100% of episodes. Agents emit correct evidence roughly 75% of the time, so `p(truth)` asymptotes near 0.65 and the original target of 0.88 was impossible by construction. That story is recorded in [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md).
 
+### What the tests do not cover
+
+Every test here checks *mechanics* — that snapshots round-trip, that a stale profile is refused, that the comparison refuses to rank on reward. **None of them assert that a learned policy beats the hardcoded pipeline**, which is why a six-step loop out-scored stage-4 MARL without anything going red. If you want the central claim defended, it has to become a test.
+
+## API surface
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/meta` | Agents, actions, policies, **strategies**, taxonomy, reward weights |
+| `POST /api/runs` | Create a run; accepts `strategy`, `experiment`, `arm`, `task_shape`, `policy_profile` |
+| `POST /api/runs/{id}/step` | Advance a simulated run |
+| `POST /api/runs/{id}/live/open` | Ask the policy who acts next; does not advance |
+| `POST /api/runs/{id}/live/report` | Fold in real agent output and advance |
+| `POST /api/runs/{id}/verdict` | Record judged answer quality |
+| `GET /api/experiments` | List experiments and their arms |
+| `GET /api/experiments/{name}` | Paired comparison, verdict and caveats |
+| `GET /api/profiles` | Learned parameters that outlive an episode |
+| `WS /ws/runs/{id}` | Live step stream for spectators |
+
 ## Art
 
 Sprites were generated with [PixelLab](https://www.pixellab.ai) via its MCP server and are re-fetchable with `.\scripts\fetch-sprites.ps1`, which pulls each character archive and regenerates the manifest. The renderer falls back to hand-authored procedural SVG sprites when no generated art is present, so the app never depends on the asset pipeline having run.
+
+Eight characters: the **generalist** who works solo before escalation, six specialists who appear only once orchestration is bought, and the orchestrator that replaces the generalist at the centre when it does. That transition is the clearest picture of what this repository measures — you can see the moment the extra agents get paid for.
 
 The roster is styled after a corporate-hacker-noir aesthetic using original archetypes rather than any protected character designs.
 

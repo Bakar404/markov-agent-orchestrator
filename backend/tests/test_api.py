@@ -25,6 +25,7 @@ def client(tmp_path_factory):
 def test_meta_exposes_agents_actions_and_policies(client):
     payload = client.get("/api/meta").json()
     assert {a["id"] for a in payload["agents"]} == {
+        "generalist",
         "planner",
         "researcher",
         "critic",
@@ -32,7 +33,7 @@ def test_meta_exposes_agents_actions_and_policies(client):
         "memory",
         "executor",
     }
-    assert len(payload["actions"]) == 8
+    assert len(payload["actions"]) == 10
     assert {p["id"] for p in payload["policies"]} >= {
         "contextual_bandit",
         "mdp",

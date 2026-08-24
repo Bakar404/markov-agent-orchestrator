@@ -39,6 +39,14 @@ def main() -> None:
     parser.add_argument("--budget", type=float, default=1.2)
     parser.add_argument("--complexity", type=float, default=0.55)
     parser.add_argument(
+        "--shape-spread",
+        type=float,
+        default=0.0,
+        help="Vary task shape by +/- this much around 0.5 per episode. 0 keeps every episode "
+        "neutral, which is how the published table was measured. Raise it to test whether "
+        "task-shape context lets a policy tell dissimilar task instances apart.",
+    )
+    parser.add_argument(
         "--policies",
         type=str,
         default="contextual_bandit,mdp,markov_game,marl",
@@ -59,6 +67,7 @@ def main() -> None:
         max_steps=args.max_steps,
         budget_usd=args.budget,
         task_complexity=args.complexity,
+        task_shape_spread=args.shape_spread,
     )
     config = outcome["config"]
 
@@ -66,7 +75,8 @@ def main() -> None:
         f"episodes={config['episodes']} per arm, "
         f"seeds {config['seed_base']}..{config['seed_base'] + config['episodes'] - 1}, "
         f"max_steps={config['max_steps']} budget=${config['budget_usd']} "
-        f"complexity={config['task_complexity']}\n"
+        f"complexity={config['task_complexity']} "
+        f"shape_spread={config['task_shape_spread']}\n"
     )
     print(
         "D is the paired carried-minus-fresh reward on identical task instances. "

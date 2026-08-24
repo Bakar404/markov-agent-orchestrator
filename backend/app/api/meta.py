@@ -9,6 +9,7 @@ from ..orchestration.actions import action_catalog
 from ..orchestration.agents import agent_catalog
 from ..orchestration.policies import policy_catalog
 from ..orchestration.state import FEATURE_NAMES
+from ..orchestration.strategies import strategy_catalog
 from ..research.taxonomy import taxonomy_catalog
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
@@ -23,6 +24,7 @@ def meta() -> dict:
         "agents": agent_catalog(),
         "actions": action_catalog(),
         "policies": policy_catalog(),
+        "strategies": strategy_catalog(),
         "taxonomy": taxonomy_catalog(),
         "reward_weights": settings.reward_weights.as_dict(),
         "state_features": list(FEATURE_NAMES),

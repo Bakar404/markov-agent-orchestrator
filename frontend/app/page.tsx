@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Arena } from "@/components/game/Arena";
 import { Controls } from "@/components/game/Controls";
@@ -22,8 +22,21 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 export default function Page() {
-  const { phase, run, feed, error, refreshAnalytics } = useGame();
+  const { phase, run, feed, error, refreshAnalytics, attachToRun } = useGame();
   const [tab, setTab] = useState<TabId>("arena");
+
+  // `?run=<id>` lets the arena spectate a run started elsewhere, e.g. by the Copilot extension.
+  // `?tab=<id>` deep-links a view so a run and a panel can be shared as one link.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const runId = params.get("run");
+    if (runId) void attachToRun(runId);
+
+    const requested = params.get("tab");
+    if (requested && TABS.some((entry) => entry.id === requested)) {
+      setTab(requested as TabId);
+    }
+  }, [attachToRun]);
 
   if (phase !== "arena" || !run) {
     return <TitleScreen />;
@@ -37,6 +50,9 @@ export default function Page() {
           <p className="mt-1 max-w-3xl font-mono text-3xs text-[#8f89c9]">{run.task}</p>
         </div>
         <div className="flex items-center gap-4">
+          <Link href="/compare" className="font-pixel text-3xs text-amber hover:text-phosphor">
+            COMPARE ▸
+          </Link>
           <Link href="/campaign" className="font-pixel text-3xs text-cyan hover:text-phosphor">
             LEARNING ▸
           </Link>

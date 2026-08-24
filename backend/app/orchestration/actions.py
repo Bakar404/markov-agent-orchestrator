@@ -7,6 +7,7 @@ from enum import Enum
 
 
 class Action(str, Enum):
+    INVOKE_GENERALIST = "invoke_generalist"
     INVOKE_PLANNER = "invoke_planner"
     INVOKE_RESEARCHER = "invoke_researcher"
     INVOKE_CRITIC = "invoke_critic"
@@ -14,6 +15,7 @@ class Action(str, Enum):
     INVOKE_EXECUTOR = "invoke_executor"
     INVOKE_MEMORY = "invoke_memory"
     RUN_PARALLEL = "run_parallel"
+    ESCALATE = "escalate"
     TERMINATE = "terminate"
 
 
@@ -21,6 +23,7 @@ ACTIONS: tuple[Action, ...] = tuple(Action)
 ACTION_INDEX: dict[Action, int] = {a: i for i, a in enumerate(ACTIONS)}
 
 SINGLE_AGENT_ACTIONS: dict[Action, str] = {
+    Action.INVOKE_GENERALIST: "generalist",
     Action.INVOKE_PLANNER: "planner",
     Action.INVOKE_RESEARCHER: "researcher",
     Action.INVOKE_CRITIC: "critic",
@@ -28,6 +31,17 @@ SINGLE_AGENT_ACTIONS: dict[Action, str] = {
     Action.INVOKE_EXECUTOR: "executor",
     Action.INVOKE_MEMORY: "memory",
 }
+
+# Legal only after escalation; before it, the generalist works alone.
+SPECIALIST_ACTIONS: tuple[Action, ...] = (
+    Action.INVOKE_PLANNER,
+    Action.INVOKE_RESEARCHER,
+    Action.INVOKE_CRITIC,
+    Action.INVOKE_VERIFIER,
+    Action.INVOKE_EXECUTOR,
+    Action.INVOKE_MEMORY,
+    Action.RUN_PARALLEL,
+)
 
 AGENT_TO_ACTION: dict[str, Action] = {v: k for k, v in SINGLE_AGENT_ACTIONS.items()}
 
@@ -41,6 +55,12 @@ class ActionSpec:
 
 
 ACTION_SPECS: dict[Action, ActionSpec] = {
+    Action.INVOKE_GENERALIST: ActionSpec(
+        Action.INVOKE_GENERALIST,
+        "Invoke Generalist",
+        "Work the task solo. The only agent available before escalation.",
+        "agent",
+    ),
     Action.INVOKE_PLANNER: ActionSpec(
         Action.INVOKE_PLANNER, "Invoke Planner", "Decompose and re-plan the frontier.", "agent"
     ),
@@ -76,6 +96,13 @@ ACTION_SPECS: dict[Action, ActionSpec] = {
         "Run Parallel",
         "Fan out to a coalition of agents; costs add, latency is the max.",
         "coalition",
+    ),
+    Action.ESCALATE: ActionSpec(
+        Action.ESCALATE,
+        "Escalate to Orchestration",
+        "Decide the task is too big to work alone and unlock the specialist roster. "
+        "Irreversible, and it pays a one-off decomposition cost.",
+        "control",
     ),
     Action.TERMINATE: ActionSpec(
         Action.TERMINATE, "Terminate", "Stop and emit the terminal reward.", "control"

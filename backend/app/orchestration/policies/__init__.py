@@ -5,13 +5,17 @@ from __future__ import annotations
 from .bandit import LinUCBPolicy
 from .base import Policy, masked_softmax
 from .baselines import HeuristicPolicy, RandomPolicy
+from .fixed_sequence import FixedSequencePolicy
 from .markov_game import CooperativeMarkovGamePolicy
 from .marl import MultiAgentRLPolicy
 from .mdp import MDPQLearningPolicy
+from .single_agent import SingleAgentPolicy
 
 POLICY_REGISTRY: dict[str, type[Policy]] = {
     RandomPolicy.id: RandomPolicy,
+    SingleAgentPolicy.id: SingleAgentPolicy,
     HeuristicPolicy.id: HeuristicPolicy,
+    FixedSequencePolicy.id: FixedSequencePolicy,
     LinUCBPolicy.id: LinUCBPolicy,
     MDPQLearningPolicy.id: MDPQLearningPolicy,
     CooperativeMarkovGamePolicy.id: CooperativeMarkovGamePolicy,
@@ -53,7 +57,9 @@ __all__ = [
     "policy_catalog",
     "masked_softmax",
     "RandomPolicy",
+    "SingleAgentPolicy",
     "HeuristicPolicy",
+    "FixedSequencePolicy",
     "LinUCBPolicy",
     "MDPQLearningPolicy",
     "CooperativeMarkovGamePolicy",

@@ -25,6 +25,7 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 # Mr. Robot themed roster: archetypes evoking the show's world, not character likenesses.
 $characters = [ordered]@{
+    generalist   = '6d1bc1b9-40d8-4430-a054-138c99f9d22e'
     planner      = '3bf751bf-6ab8-4f0b-aa33-73599b61189b'
     researcher   = '2bdca27b-382f-4e7b-8613-48f694111ad1'
     critic       = '39ea6a3d-4616-4d85-94c9-1be2eb19e343'
@@ -35,6 +36,7 @@ $characters = [ordered]@{
 }
 
 $descriptions = @{
+    generalist   = 'Lone operator in an olive field jacket, beanie and satchel'
     planner      = 'Hooded hacker, hood up, face in shadow'
     researcher   = 'Short dark hair, black leather jacket, headphones'
     critic       = 'Corporate executive, navy suit, slicked blond hair'

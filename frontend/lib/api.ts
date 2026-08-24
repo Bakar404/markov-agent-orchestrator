@@ -3,6 +3,8 @@ import type {
   CampaignResponse,
   CitationGraph,
   CreateRunPayload,
+  ExperimentComparison,
+  ExperimentSummary,
   InteractionGraph,
   Meta,
   Paper,
@@ -81,6 +83,15 @@ export const api = {
   traces: (id: string) => request<Trace[]>(`/api/runs/${id}/traces`),
   metrics: (id: string) => request<RunMetrics>(`/api/runs/${id}/metrics`),
   interactionGraph: (id: string) => request<InteractionGraph>(`/api/runs/${id}/graph`),
+
+  experiments: () => request<ExperimentSummary[]>("/api/experiments"),
+  experiment: (name: string) =>
+    request<ExperimentComparison>(`/api/experiments/${encodeURIComponent(name)}`),
+  scoreRun: (id: string, payload: { score: number; judge?: string; rubric?: string; notes?: string }) =>
+    request<{ run_id: string; score: number }>(`/api/runs/${id}/verdict`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   researchStats: () => request<ResearchStats>("/api/research/stats"),
   papers: (params: { tag?: string; search?: string; limit?: number } = {}) => {

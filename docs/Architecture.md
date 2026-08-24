@@ -76,7 +76,7 @@ The frontend holds no simulation logic. It renders persisted state and streams s
 
 ### State S
 
-`OrchestratorState` in [backend/app/orchestration/state.py](../backend/app/orchestration/state.py) carries the full observation. The policy consumes a 12-dimensional feature vector derived from it:
+`OrchestratorState` in [backend/app/orchestration/state.py](../backend/app/orchestration/state.py) carries the full observation. The policy consumes a 17-dimensional feature vector derived from it:
 
 | Feature | Source | Meaning |
 | --- | --- | --- |
@@ -92,6 +92,15 @@ The frontend holds no simulation logic. It renders persisted state and streams s
 | `verification_score` | accumulated | Independently verified fraction of the artifact |
 | `mean_agent_success` | Beta posteriors | Average competence across the agent roster |
 | `duplicate_pressure` | accumulated | Recent repeated work with no information gain |
+| `has_escalated` | escalation gate | Whether specialists have been unlocked |
+| `stall` | accumulated | Saturating measure of steps that moved nothing |
+| `needs_evidence` | run config | How much the task depends on external evidence |
+| `needs_execution` | run config | How much is producing artifacts rather than deciding |
+| `needs_verification` | run config | How costly being wrong would be |
+
+The last five exist because without them every task presented an identical context vector at step 0 — uniform belief, full budget, zero quality — leaving the policy nothing to condition its first decision on.
+
+Task-shape and `stall` are excluded from `discretize()`, which keys the tabular value functions. That table holds tens of entries after several episodes, and extra dimensions would multiply its key space for no gain; specialization reaches the linear policies through `features()` instead.
 
 Uncertainty is not a free parameter. The orchestrator maintains a Dirichlet concentration vector over `K` competing solution hypotheses (default 8). Entropy is computed on the posterior mean of that Dirichlet, in bits.
 
@@ -99,13 +108,17 @@ Confidence deserves a note. A posterior can be sharply peaked while resting on a
 
 ### Action space A
 
-Eight actions, defined in [backend/app/orchestration/actions.py](../backend/app/orchestration/actions.py):
+Ten actions, defined in [backend/app/orchestration/actions.py](../backend/app/orchestration/actions.py):
 
+* `INVOKE_GENERALIST`, the solo agent that works before any orchestration is bought
+* `ESCALATE`, which unlocks the specialists and is the episode's first real decision
 * Six single-agent invocations covering Planner, Research, Critic, Verification, Memory, and Executor
 * `RUN_PARALLEL`, which dispatches a coalition of two or three agents
 * `TERMINATE`, which stops the episode and triggers the terminal reward
 
-Two actions are conditionally legal. `RUN_PARALLEL` requires budget and latency headroom. `TERMINATE` is gated behind `min_steps_before_terminate`, because an orchestrator that stops before producing anything is not making a meaningful decision.
+The action space is **gated on escalation**. Before it fires, only `INVOKE_GENERALIST` and `ESCALATE` are legal, so a run cannot orchestrate without first deciding to. `min_solo_steps` requires a solo attempt before `ESCALATE` becomes available, because escalating before trying is not a decision informed by anything.
+
+After escalation the specialists unlock. `RUN_PARALLEL` still requires budget and latency headroom, and `TERMINATE` is still gated behind `min_steps_before_terminate`, because an orchestrator that stops before producing anything is not making a meaningful decision.
 
 ### Transition kernel P
 

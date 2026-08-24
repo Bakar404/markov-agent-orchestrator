@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { useGame } from "@/lib/store";
-import type { Trace } from "@/lib/types";
+import type { AgentReport, Trace } from "@/lib/types";
 
 const OUTCOME_TONE: Record<string, string> = {
   success: "text-lime",
@@ -12,6 +12,49 @@ const OUTCOME_TONE: Record<string, string> = {
   terminal: "text-cyan",
   noop: "text-edge",
 };
+
+/** What each agent actually produced. Only live runs carry real text; sim runs carry summaries. */
+function Reports({ reports }: { reports: AgentReport[] }) {
+  if (reports.length === 0) return null;
+
+  return (
+    <div className="lg:col-span-3">
+      <p className="stat-label">Agent output</p>
+      <div className="mt-2 space-y-2">
+        {reports.map((report, index) => (
+          <div key={`${report.agent_id}-${index}`} className="border-2 border-edge px-2 py-1">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <span className="font-pixel text-3xs text-phosphor">
+                {report.agent_id.toUpperCase()}
+              </span>
+              <span className={`font-mono text-3xs ${OUTCOME_TONE[report.outcome] ?? "text-edge"}`}>
+                {report.outcome}
+              </span>
+              {report.source === "live" && (
+                <span className="font-pixel text-3xs text-violet">◆ LIVE</span>
+              )}
+              {report.claimed_hypothesis !== null &&
+                report.claimed_hypothesis !== undefined && (
+                  <span className="font-mono text-3xs text-cyan">
+                    claims H{report.claimed_hypothesis}
+                  </span>
+                )}
+              <span className="ml-auto font-mono text-3xs tabular-nums text-[#8f89c9]">
+                {report.tokens.toLocaleString()} tok · ${report.cost_usd.toFixed(4)}
+              </span>
+            </div>
+            <p className="mt-1 font-mono text-3xs text-[#8f89c9]">{report.summary}</p>
+            {report.response_excerpt ? (
+              <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-3xs text-edge">
+                {report.response_excerpt}
+              </pre>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function Distribution({ trace }: { trace: Trace }) {
   const entries = Object.entries(trace.action_distribution)
@@ -53,6 +96,9 @@ function Distribution({ trace }: { trace: Trace }) {
 }
 
 function Detail({ trace }: { trace: Trace }) {
+  const feed = useGame((state) => state.feed);
+  // Traces are persisted without report bodies, so the real text comes from the live step feed.
+  const reports = feed.find((step) => step.step === trace.step)?.reports ?? [];
   const breakdown = trace.reward_breakdown;
   const terms = Object.entries(breakdown).filter(
     ([key]) => !["per_agent", "total"].includes(key),
@@ -146,6 +192,8 @@ function Detail({ trace }: { trace: Trace }) {
         </table>
         <p className="mt-2 font-mono text-3xs leading-relaxed text-edge">{trace.notes}</p>
       </div>
+
+      <Reports reports={reports} />
     </div>
   );
 }
@@ -153,6 +201,9 @@ function Detail({ trace }: { trace: Trace }) {
 export function TraceExplorer() {
   const { traces } = useGame();
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Newest first, so the step that just arrived is the one open by default.
+  const latest = traces.length > 0 ? traces[traces.length - 1].id : null;
+  const selected = expanded ?? latest;
 
   if (traces.length === 0) {
     return (
@@ -189,11 +240,10 @@ export function TraceExplorer() {
               .slice()
               .reverse()
               .map((trace) => {
-                const open = expanded === trace.id;
+                const open = selected === trace.id;
                 return (
-                  <>
+                  <Fragment key={trace.id}>
                     <tr
-                      key={trace.id}
                       onClick={() => setExpanded(open ? null : trace.id)}
                       className={`cursor-pointer border-b border-[#221f42] hover:bg-slabLight ${
                         open ? "bg-slabLight" : ""
@@ -234,13 +284,13 @@ export function TraceExplorer() {
                       </td>
                     </tr>
                     {open ? (
-                      <tr key={`${trace.id}-detail`}>
+                      <tr>
                         <td colSpan={9} className="p-0">
                           <Detail trace={trace} />
                         </td>
                       </tr>
                     ) : null}
-                  </>
+                  </Fragment>
                 );
               })}
           </tbody>

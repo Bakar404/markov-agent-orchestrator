@@ -64,10 +64,37 @@ class ArmSummary:
         }
 
 
+def _task_shape_for(seed: int, spread: float) -> dict[str, float]:
+    """Deterministic task shape for an episode.
+
+    Derived from the episode seed, so the carried and fresh arms see identical task instances
+    and the paired difference stays exact. ``spread`` of 0 pins every episode to the neutral
+    0.5, which is the behaviour the published campaign table was measured under.
+    """
+    if spread <= 0.0:
+        return {}
+    rng = np.random.default_rng(seed ^ 0x5EED)
+    half = min(spread, 0.5)
+    return {
+        name: float(np.clip(rng.uniform(0.5 - half, 0.5 + half), 0.0, 1.0))
+        for name in ("needs_evidence", "needs_execution", "needs_verification")
+    }
+
+
 def _run_episode(
-    policy_id: str, seed: int, carried_state: dict | None, overrides: dict
+    policy_id: str,
+    seed: int,
+    carried_state: dict | None,
+    overrides: dict,
+    shape_spread: float = 0.0,
 ) -> tuple[EpisodeResult, dict]:
-    config = RunConfig(task="campaign", policy=policy_id, seed=seed, **overrides)
+    config = RunConfig(
+        task="campaign",
+        policy=policy_id,
+        seed=seed,
+        task_shape=_task_shape_for(seed, shape_spread),
+        **overrides,
+    )
     engine = OrchestrationEngine(config)
     if carried_state:
         engine.policy.load_state_dict(carried_state)
@@ -90,14 +117,23 @@ def _run_episode(
 
 
 def _run_arm(
-    policy_id: str, episodes: int, seed_base: int, carry: bool, overrides: dict
+    policy_id: str,
+    episodes: int,
+    seed_base: int,
+    carry: bool,
+    overrides: dict,
+    shape_spread: float = 0.0,
 ) -> ArmSummary:
     results: list[EpisodeResult] = []
     carried: dict | None = None
 
     for index in range(episodes):
         result, policy_state = _run_episode(
-            policy_id, seed_base + index, carried if carry else None, overrides
+            policy_id,
+            seed_base + index,
+            carried if carry else None,
+            overrides,
+            shape_spread,
         )
         result.episode = index
         results.append(result)
@@ -139,6 +175,7 @@ def run_campaign(
     max_steps: int = 40,
     budget_usd: float = 1.2,
     task_complexity: float = 0.55,
+    task_shape_spread: float = 0.0,
 ) -> dict:
     """Run the paired carried-vs-fresh experiment for each requested policy."""
     episodes = max(2, min(episodes, MAX_EPISODES))
@@ -157,8 +194,8 @@ def run_campaign(
 
     results = []
     for policy_id in selected:
-        carried = _run_arm(policy_id, episodes, seed_base, True, overrides)
-        fresh = _run_arm(policy_id, episodes, seed_base, False, overrides)
+        carried = _run_arm(policy_id, episodes, seed_base, True, overrides, task_shape_spread)
+        fresh = _run_arm(policy_id, episodes, seed_base, False, overrides, task_shape_spread)
 
         carried_rewards = [e.reward for e in carried.episodes]
         fresh_rewards = [e.reward for e in fresh.episodes]
@@ -190,6 +227,7 @@ def run_campaign(
             "max_steps": max_steps,
             "budget_usd": budget_usd,
             "task_complexity": task_complexity,
+            "task_shape_spread": task_shape_spread,
             "policies": selected,
         },
         "results": results,

@@ -13,12 +13,19 @@ from dataclasses import asdict, dataclass, field
 import numpy as np
 
 from ..config import Settings, get_settings
-from .actions import ACTION_SPECS, ACTIONS, Action, SINGLE_AGENT_ACTIONS
-from .agents import AGENTS
+from .actions import (
+    ACTION_SPECS,
+    ACTIONS,
+    SINGLE_AGENT_ACTIONS,
+    SPECIALIST_ACTIONS,
+    Action,
+)
+from .agents import AGENTS, SOLO_AGENT
+from .live import AgentBrief, PendingStep, build_brief, default_hypotheses
 from .policies import DEFAULT_POLICY, Policy, create_policy
 from .rewards import RewardModel
 from .state import FEATURE_DIM, OrchestratorState, initial_state
-from .transitions import TransitionModel, agents_for_action
+from .transitions import AgentReport, TransitionModel, TransitionOutcome, agents_for_action
 
 ORCHESTRATOR_NODE = "orchestrator"
 
@@ -40,6 +47,28 @@ class RunConfig:
     verification_target: float = 0.75
     min_steps_before_terminate: int = 3
     """An orchestrator may not stop before it has produced anything."""
+    mode: str = "sim"
+    """``sim`` samples outcomes; ``live`` waits for real agent invocations to be reported back."""
+    hypotheses: list[str] = field(default_factory=list)
+    """Named competing answers, one per belief dimension. Live mode only."""
+    task_shape: dict[str, float] = field(default_factory=dict)
+    """needs_evidence / needs_execution / needs_verification, each 0-1. Lets one router
+    specialize per task type instead of treating every task as identical at step 0."""
+    policy_profile: str | None = None
+    """Named learned parameters to load at start and update on termination."""
+    experiment: str | None = None
+    """Groups arms of the same A/B comparison."""
+    arm: str | None = None
+    """Which arm this run is, e.g. 'control' or 'marl'."""
+    policy_options: dict = field(default_factory=dict)
+    """Extra keyword arguments for the policy constructor, e.g. the control's agent_id."""
+    escalation_cost_usd: float = 0.03
+    """One-off decomposition cost paid when the orchestrator fans out."""
+    escalation_latency_ms: float = 900.0
+    min_solo_steps: int = 1
+    """The generalist must attempt the task before escalation becomes legal."""
+    allow_escalation: bool = True
+    """Set false for a pure solo control arm that can never orchestrate."""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -85,14 +114,32 @@ class StepResult:
         return asdict(self)
 
 
+@dataclass
+class _Decision:
+    """What the policy chose, before the environment has realized anything."""
+
+    prev_state: OrchestratorState
+    legal: list[Action]
+    action: Action
+    probability: float
+    distribution: dict[str, float]
+    agent_ids: list[str]
+    started: float
+
+
 class OrchestrationEngine:
     def __init__(self, config: RunConfig, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.config = config
         self.rng = np.random.default_rng(config.seed)
-        self.policy: Policy = create_policy(config.policy, feature_dim=FEATURE_DIM)
+        self.policy: Policy = create_policy(
+            config.policy, feature_dim=FEATURE_DIM, **config.policy_options
+        )
         self.transition_model = TransitionModel(
-            belief_dim=config.belief_dim, stochasticity=config.stochasticity
+            belief_dim=config.belief_dim,
+            stochasticity=config.stochasticity,
+            escalation_cost_usd=config.escalation_cost_usd,
+            escalation_latency_ms=config.escalation_latency_ms,
         )
         self.reward_model = RewardModel(self.settings.reward_weights)
         self.state = initial_state(
@@ -101,24 +148,46 @@ class OrchestrationEngine:
             latency_budget_ms=config.latency_budget_ms,
             belief_dim=config.belief_dim,
             rng=self.rng,
+            task_shape=config.task_shape,
         )
         self.initial_state_payload = self.state.to_dict()
         self.cumulative_reward = 0.0
         self.total_cost = 0.0
         self.total_latency_ms = 0.0
         self.total_tokens = 0
+        self._pending: tuple[str, _Decision] | None = None
 
     # ------------------------------------------------------------ properties
     @property
     def done(self) -> bool:
         return self.state.terminated
 
+    @property
+    def is_live(self) -> bool:
+        return self.config.mode == "live"
+
+    @property
+    def hypotheses(self) -> list[str]:
+        return self.config.hypotheses or default_hypotheses(self.config.belief_dim)
+
     # ---------------------------------------------------------------- step
     def legal_actions(self) -> list[Action]:
-        legal = [a for a in ACTIONS if a not in {Action.RUN_PARALLEL, Action.TERMINATE}]
-        if self.state.budget_remaining > 0.12 and self.state.latency_remaining > 0.1:
+        state = self.state
+
+        if not state.has_escalated:
+            # One agent works the task. Escalating is the only way to reach the specialists,
+            # and it has to be earned by attempting the work first.
+            legal = [Action.INVOKE_GENERALIST]
+            if self.config.allow_escalation and state.solo_steps >= self.config.min_solo_steps:
+                legal.append(Action.ESCALATE)
+            if state.step >= self.config.min_steps_before_terminate and self._may_terminate():
+                legal.append(Action.TERMINATE)
+            return legal
+
+        legal = [a for a in SPECIALIST_ACTIONS if a is not Action.RUN_PARALLEL]
+        if state.budget_remaining > 0.12 and state.latency_remaining > 0.1:
             legal.append(Action.RUN_PARALLEL)
-        if self.state.step >= self.config.min_steps_before_terminate and self._may_terminate():
+        if state.step >= self.config.min_steps_before_terminate and self._may_terminate():
             legal.append(Action.TERMINATE)
         return legal
 
@@ -136,6 +205,73 @@ class OrchestrationEngine:
         )
 
     def step(self) -> StepResult:
+        decision = self._decide()
+        outcome = self.transition_model.sample(
+            decision.prev_state,
+            decision.action,
+            self.rng,
+            preference=self.policy.agent_preferences(decision.prev_state),
+            agent_ids=decision.agent_ids,
+        )
+        return self._realize(decision, outcome)
+
+    # ------------------------------------------------------------- live mode
+    def open_step(self, token: str) -> PendingStep:
+        """Let the policy choose, then stop. State does not advance until close_step."""
+        decision = self._decide()
+        self._pending = (token, decision)
+
+        hypotheses = self.hypotheses
+        briefs = [
+            build_brief(AGENTS[agent_id], decision.prev_state, self.config.task, hypotheses)
+            for agent_id in decision.agent_ids
+        ]
+        return PendingStep(
+            token=token,
+            run_id="",
+            step=decision.prev_state.step + 1,
+            action=decision.action.value,
+            agent_ids=list(decision.agent_ids),
+            action_probability=decision.probability,
+            action_distribution=decision.distribution,
+            briefs=briefs,
+        )
+
+    def close_step(self, token: str, reports: list[AgentReport]) -> StepResult:
+        """Realize the pending step from reports of what the agents actually produced."""
+        if self._pending is None:
+            raise LookupError("No step is open; call open_step first")
+        pending_token, decision = self._pending
+        if pending_token != token:
+            raise LookupError("Step token does not match the open step")
+
+        if decision.action is Action.TERMINATE:
+            override = []
+        else:
+            expected = set(decision.agent_ids)
+            got = {report.agent_id for report in reports}
+            if got != expected:
+                raise ValueError(
+                    f"expected reports for {sorted(expected)}, got {sorted(got)}"
+                )
+            override = reports
+
+        outcome = self.transition_model.sample(
+            decision.prev_state,
+            decision.action,
+            self.rng,
+            preference=self.policy.agent_preferences(decision.prev_state),
+            agent_ids=decision.agent_ids,
+            reports_override=override or None,
+        )
+        self._pending = None
+        return self._realize(decision, outcome)
+
+    def abandon_step(self) -> None:
+        self._pending = None
+
+    # --------------------------------------------------------------- phases
+    def _decide(self) -> "_Decision":
         if self.state.terminated:
             raise RuntimeError("Run has already terminated")
 
@@ -145,21 +281,35 @@ class OrchestrationEngine:
 
         action, probability, distribution = self.policy.select(prev_state, legal, self.rng)
 
-        coalition = None
-        if action is Action.RUN_PARALLEL:
-            coalition = self.policy.preferred_coalition(prev_state)
-            if not coalition:
-                coalition = agents_for_action(
-                    action, prev_state, self.rng, self.policy.agent_preferences(prev_state)
-                )
+        if action is Action.TERMINATE:
+            agent_ids: list[str] = []
+        elif action is Action.ESCALATE:
+            agent_ids = []
+        elif action is Action.RUN_PARALLEL:
+            agent_ids = self.policy.preferred_coalition(prev_state) or agents_for_action(
+                action, prev_state, self.rng, self.policy.agent_preferences(prev_state)
+            )
+        else:
+            agent_ids = [SINGLE_AGENT_ACTIONS[action]]
 
-        outcome = self.transition_model.sample(
-            prev_state,
-            action,
-            self.rng,
-            preference=self.policy.agent_preferences(prev_state),
-            agent_ids=coalition,
+        return _Decision(
+            prev_state=prev_state,
+            legal=legal,
+            action=action,
+            probability=probability,
+            distribution=distribution,
+            agent_ids=agent_ids,
+            started=started,
         )
+
+    def _realize(self, decision: "_Decision", outcome: TransitionOutcome) -> StepResult:
+        prev_state = decision.prev_state
+        action = decision.action
+        probability = decision.probability
+        distribution = decision.distribution
+        legal = decision.legal
+        started = decision.started
+
         next_state = outcome.next_state
         agent_ids = [report.agent_id for report in outcome.reports]
 
@@ -284,6 +434,22 @@ class OrchestrationEngine:
             )
             return messages
 
+        if action is Action.ESCALATE:
+            messages.append(
+                {
+                    "step": step,
+                    "sender": SOLO_AGENT,
+                    "receiver": ORCHESTRATOR_NODE,
+                    "kind": "escalate",
+                    "content": (
+                        "Generalist escalated: task too large to work alone, "
+                        f"stall={prev_state.stall:.2f}, open subtasks={prev_state.unresolved_subtasks}."
+                    ),
+                    "weight": probability,
+                }
+            )
+            return messages
+
         upstream = prev_state.last_agents or [ORCHESTRATOR_NODE]
         for receiver in agent_ids:
             for sender in upstream:
@@ -341,6 +507,11 @@ class OrchestrationEngine:
     def _notes(action: Action, outcome, reward: float) -> str:
         if action is Action.TERMINATE:
             return "Terminal action selected by the policy."
+        if action is Action.ESCALATE:
+            return (
+                "Task judged too large to work alone; specialist roster unlocked "
+                f"(R={reward:+.3f})."
+            )
         agents = ", ".join(AGENTS[r.agent_id].label for r in outcome.reports)
         return (
             f"{agents} → {outcome.outcome} "

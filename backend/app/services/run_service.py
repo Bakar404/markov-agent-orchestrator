@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import uuid
 from collections import defaultdict
 
 from sqlalchemy import delete, func, select
@@ -17,7 +18,10 @@ from sqlalchemy.orm import Session
 from ..models import Message, Paper, Run, StateSnapshot, Trace
 from ..orchestration.agents import AGENTS, agent_catalog
 from ..orchestration.engine import OrchestrationEngine, RunConfig, StepResult
+from ..orchestration.live import report_from_response
+from ..orchestration.strategies import get_strategy
 from ..schemas import RunCreate
+from .policy_profile_service import PolicyProfileService
 
 _engines: dict[str, OrchestrationEngine] = {}
 _locks: dict[str, asyncio.Lock] = {}
@@ -42,9 +46,19 @@ class RunService:
     # -------------------------------------------------------------- create
     def create(self, payload: RunCreate) -> dict:
         seed = payload.seed if payload.seed is not None else random.randrange(1, 2**31 - 1)
+
+        policy = payload.policy
+        policy_options = dict(payload.policy_options)
+        arm = payload.arm
+        if payload.strategy:
+            strategy = get_strategy(payload.strategy)
+            policy = strategy.policy
+            policy_options = {**(strategy.policy_options or {}), **policy_options}
+            arm = arm or strategy.id
+
         config = RunConfig(
             task=payload.task,
-            policy=payload.policy,
+            policy=policy,
             seed=seed,
             task_complexity=payload.task_complexity,
             budget_usd=payload.budget_usd,
@@ -55,13 +69,22 @@ class RunService:
             confidence_target=payload.confidence_target,
             verification_target=payload.verification_target,
             min_steps_before_terminate=payload.min_steps_before_terminate,
+            mode=payload.mode,
+            hypotheses=list(payload.hypotheses),
+            task_shape=dict(payload.task_shape),
+            policy_profile=payload.policy_profile,
+            experiment=payload.experiment,
+            arm=arm,
+            policy_options=policy_options,
         )
         engine = OrchestrationEngine(config)
+        if payload.policy_profile:
+            PolicyProfileService(self.session).apply_to(engine, payload.policy_profile)
         snapshot = engine.snapshot()
 
         run = Run(
             task=payload.task,
-            policy=payload.policy,
+            policy=policy,
             status="created",
             seed=seed,
             config=snapshot["config"],
@@ -107,6 +130,9 @@ class RunService:
         engine = self.engine_for(run_id)
         if engine.done:
             raise ValueError("Run has already terminated")
+        if engine.is_live:
+            # Sampling a step here would fabricate an outcome inside a real episode.
+            raise ValueError("Live runs advance through /live/open and /live/report, not /step")
 
         result = engine.step()
         self._persist_step(run, engine, result)
@@ -120,6 +146,66 @@ class RunService:
                 break
             results.append(self.step(run_id))
         return results
+
+    # ----------------------------------------------------------- live mode
+    def live_open(self, run_id: str) -> dict:
+        """Ask the policy who acts next and return their brief. State does not advance."""
+        run = self._run(run_id)
+        engine = self.engine_for(run_id)
+        if not engine.is_live:
+            raise ValueError("Run is not in live mode")
+        if engine.done:
+            raise ValueError("Run has already terminated")
+
+        pending = engine.open_step(uuid.uuid4().hex)
+        pending.run_id = run_id
+        if run.status != "running":
+            run.status = "running"
+            self.session.commit()
+        return pending.to_dict()
+
+    def live_report(
+        self,
+        run_id: str,
+        token: str,
+        reports: list,
+        hypotheses: list[str] | None = None,
+    ) -> dict:
+        """Fold real agent output into the episode and advance one step."""
+        run = self._run(run_id)
+        engine = self.engine_for(run_id)
+        if not engine.is_live:
+            raise ValueError("Run is not in live mode")
+
+        if hypotheses and not engine.config.hypotheses:
+            if len(hypotheses) != engine.config.belief_dim:
+                raise ValueError(
+                    f"expected {engine.config.belief_dim} hypotheses, got {len(hypotheses)}"
+                )
+            engine.config.hypotheses = list(hypotheses)
+
+        # engine.state is still the pre-step state until close_step runs, which is exactly the
+        # state the briefs were built from.
+        unknown = sorted({item.agent_id for item in reports} - set(AGENTS))
+        if unknown:
+            raise ValueError(f"unknown agent id(s): {', '.join(unknown)}")
+
+        built = [
+            report_from_response(
+                AGENTS[item.agent_id],
+                engine.state,
+                item.model_dump(),
+                belief_dim=engine.config.belief_dim,
+            )
+            for item in reports
+        ]
+
+        result = engine.close_step(token, built)
+        self._persist_step(run, engine, result)
+        return result.to_dict()
+
+    def live_abandon(self, run_id: str) -> None:
+        self.engine_for(run_id).abandon_step()
 
     def _persist_step(self, run: Run, engine: OrchestrationEngine, result: StepResult) -> None:
         snapshot = engine.snapshot()
@@ -190,6 +276,12 @@ class RunService:
         run.policy_state = snapshot
         run.status = "completed" if result.done else "running"
         self.session.commit()
+
+        if result.done and engine.config.policy_profile:
+            # One capture per episode, so profile.episodes counts episodes rather than steps.
+            PolicyProfileService(self.session).capture(
+                engine, engine.config.policy_profile, episode_reward=result.cumulative_reward
+            )
 
     # --------------------------------------------------------------- reset
     def reset(self, run_id: str, *, seed: int | None = None, keep_policy_learning: bool = False) -> dict:

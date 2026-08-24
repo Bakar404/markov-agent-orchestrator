@@ -18,7 +18,14 @@ export type Phase = "title" | "booting" | "arena";
 /** Kept outside the store: a live socket is not serializable state. */
 let socket: WebSocket | null = null;
 
+/** Guards against React StrictMode invoking the attach effect twice and racing the socket. */
+let attaching: string | null = null;
+
 const MAX_FEED = 60;
+
+/** Live runs are driven by an agent conversation; the browser must never step them itself. */
+export const isLive = (state: { run: RunDetail | null }): boolean =>
+  state.run?.config?.mode === "live";
 
 interface GameState {
   phase: Phase;
@@ -39,6 +46,7 @@ interface GameState {
 
   loadMeta: () => Promise<void>;
   startGame: (payload: CreateRunPayload) => Promise<void>;
+  attachToRun: (runId: string) => Promise<void>;
   connect: (runId: string) => void;
   play: () => void;
   pause: () => void;
@@ -102,6 +110,37 @@ export const useGame = create<GameState>((set, get) => ({
     }
   },
 
+  /** Join a run that already exists — typically one the Copilot extension created. */
+  attachToRun: async (runId) => {
+    if (attaching === runId) return;
+    if (get().run?.id === runId && get().phase === "arena") return;
+    attaching = runId;
+    set({ booting: true, error: null, phase: "booting" });
+    try {
+      const run = await api.getRun(runId);
+      set({
+        run,
+        phase: "arena",
+        booting: false,
+        feed: [],
+        lastStep: null,
+        metrics: null,
+        traces: [],
+        combo: 0,
+        activeAgents: [],
+      });
+      get().connect(run.id);
+      void get().refreshAnalytics();
+    } catch (error) {
+      attaching = null;
+      set({
+        booting: false,
+        phase: "title",
+        error: error instanceof ApiError ? error.message : String(error),
+      });
+    }
+  },
+
   connect: (runId) => {
     socket?.close();
     const next = new WebSocket(runSocketUrl(runId));
@@ -131,6 +170,9 @@ export const useGame = create<GameState>((set, get) => ({
           activeAgents: step.agents,
           combo: step.reward > 0 ? previous + 1 : 0,
         }));
+        // Live steps are minutes apart, so refetching keeps the trace table aligned with the
+        // feed. Sim playback can fire every 140ms, where this would hammer the API for nothing.
+        if (isLive(get())) void get().refreshAnalytics();
         return;
       }
 
@@ -152,6 +194,7 @@ export const useGame = create<GameState>((set, get) => ({
   },
 
   play: () => {
+    if (isLive(get())) return;
     if (socket?.readyState !== WebSocket.OPEN) return;
     socket.send(JSON.stringify({ type: "start", interval_ms: get().intervalMs }));
     set({ playing: true });
@@ -165,6 +208,7 @@ export const useGame = create<GameState>((set, get) => ({
   },
 
   stepOnce: () => {
+    if (isLive(get())) return;
     if (socket?.readyState !== WebSocket.OPEN) return;
     socket.send(JSON.stringify({ type: "step" }));
   },
@@ -200,6 +244,7 @@ export const useGame = create<GameState>((set, get) => ({
   },
 
   quitToTitle: () => {
+    attaching = null;
     socket?.close();
     socket = null;
     set({
