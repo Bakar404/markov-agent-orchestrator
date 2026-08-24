@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { PixelSprite } from "@/components/pixel/PixelSprite";
+import { SiteNav } from "@/components/game/SiteNav";
 import { api } from "@/lib/api";
 import { useGame } from "@/lib/store";
 import type { Paper } from "@/lib/types";
@@ -36,6 +37,7 @@ export function TitleScreen() {
   const [experiment, setExperiment] = useState("");
   const [papers, setPapers] = useState<Paper[]>([]);
   const [papersNote, setPapersNote] = useState<string | null>(null);
+  const [showCli, setShowCli] = useState(false);
 
   useEffect(() => {
     void loadMeta();
@@ -106,39 +108,49 @@ export function TitleScreen() {
 
         <div className="panel max-w-2xl px-6 py-4 text-center">
           <p className="font-mono text-xs leading-relaxed text-[#a9a3e0]">
-            One agent starts. Six more wait behind an escalation gate that costs budget to open.
-            The question is whether opening it was worth it — so every strategy is measured
-            against a single agent doing the same task alone.
+            Most teams add agents and assume it helped. This measures it: the same task on the
+            same seed, one arm solo and one allowed to escalate, judged blind by someone who
+            never learns which arm is which.
           </p>
         </div>
 
-        <div className="panel max-w-2xl px-6 py-4">
-          <p className="stat-label text-center">Run a real experiment</p>
-          <p className="mt-2 text-center font-mono text-3xs leading-relaxed text-[#8f89c9]">
-            Your agent does the work; the arena decides who acts and records what it cost.
-          </p>
-          <pre className="mt-3 overflow-x-auto border-2 border-edge bg-ink px-3 py-2 font-mono text-3xs text-phosphor">
+        <div className="flex flex-col items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setScreen("setup")}
+            className="pixel-btn pixel-btn-primary px-8 py-3 font-pixel text-2xs sm:text-xs"
+          >
+            ▶ START A RUN
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCli((open) => !open)}
+            className="font-pixel text-3xs text-edge hover:text-phosphor"
+          >
+            {showCli ? "▴ HIDE" : "▾"} OR DRIVE A LIVE RUN FROM THE CLI
+          </button>
+        </div>
+
+        {showCli ? (
+          <div className="panel max-w-2xl px-6 py-4">
+            <p className="text-center font-mono text-3xs leading-relaxed text-[#8f89c9]">
+              Your agent does the work; the arena decides who acts and records what it cost.
+            </p>
+            <pre className="mt-3 overflow-x-auto border-2 border-edge bg-ink px-3 py-2 font-mono text-3xs text-phosphor">
 {`cd ${"C:\\src\\markov-agent-orchestrator"}
 copilot
 
 > compare orchestration against a single agent on: <your task>`}
-          </pre>
-          <p className="mt-2 text-center font-mono text-3xs text-edge">
-            Results land in{" "}
-            <Link href="/compare" className="text-cyan hover:text-phosphor">
-              /compare
-            </Link>
-            . Live steps cost real credits.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setScreen("setup")}
-          className="font-pixel text-3xs text-amber hover:text-phosphor sm:text-2xs"
-        >
-          ▶ OR EXPLORE IN SIMULATION (FREE)
-        </button>
+            </pre>
+            <p className="mt-2 text-center font-mono text-3xs text-edge">
+              Results land in{" "}
+              <Link href="/compare" className="text-cyan hover:text-phosphor">
+                /compare
+              </Link>
+              .
+            </p>
+          </div>
+        ) : null}
 
         {offline ? (
           <p className="font-pixel text-3xs text-crimson">
@@ -148,17 +160,7 @@ copilot
           <p className="font-pixel text-3xs text-edge">INSERT COIN · V0.1 · 2026</p>
         )}
 
-        <nav className="flex items-center gap-5">
-          <Link href="/compare" className="font-pixel text-3xs text-amber hover:text-phosphor">
-            COMPARE ▸
-          </Link>
-          <Link href="/campaign" className="font-pixel text-3xs text-cyan hover:text-phosphor">
-            LEARNING LAB ▸
-          </Link>
-          <Link href="/research" className="font-pixel text-3xs text-violet hover:text-phosphor">
-            STRATEGIES ▸
-          </Link>
-        </nav>
+        <SiteNav />
       </main>
     );
   }
@@ -256,9 +258,11 @@ copilot
                 <span className="mt-1 block font-mono text-3xs leading-relaxed text-[#8f89c9]">
                   {option.summary}
                 </span>
-                <span className="mt-1 block font-mono text-3xs leading-relaxed text-edge">
-                  {option.when}
-                </span>
+                {selected ? (
+                  <span className="mt-1 block font-mono text-3xs leading-relaxed text-edge">
+                    {option.when}
+                  </span>
+                ) : null}
               </button>
             );
           })}

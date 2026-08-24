@@ -8,6 +8,7 @@ import { Controls } from "@/components/game/Controls";
 import { GraphView } from "@/components/game/GraphView";
 import { HUD } from "@/components/game/HUD";
 import { RewardDashboard } from "@/components/game/RewardDashboard";
+import { SiteNav } from "@/components/game/SiteNav";
 import { TitleScreen } from "@/components/game/TitleScreen";
 import { TraceExplorer } from "@/components/game/TraceExplorer";
 import { useGame } from "@/lib/store";
@@ -50,15 +51,7 @@ export default function Page() {
           <p className="mt-1 max-w-3xl font-mono text-3xs text-[#8f89c9]">{run.task}</p>
         </div>
         <div className="flex items-center gap-4">
-          <Link href="/compare" className="font-pixel text-3xs text-amber hover:text-phosphor">
-            COMPARE ▸
-          </Link>
-          <Link href="/campaign" className="font-pixel text-3xs text-cyan hover:text-phosphor">
-            LEARNING ▸
-          </Link>
-          <Link href="/research" className="font-pixel text-3xs text-violet hover:text-phosphor">
-            RESEARCH ▸
-          </Link>
+          <SiteNav current="/" />
           <div className="text-right">
             <p className="font-pixel text-3xs text-amber">{run.policy.toUpperCase()}</p>
             <p className="font-mono text-3xs text-edge">SEED {run.seed}</p>
