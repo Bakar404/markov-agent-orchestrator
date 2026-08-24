@@ -289,14 +289,18 @@ copilot
             <ul className="mt-1 space-y-1">
               {papers.map((paper) => (
                 <li key={paper.id} className="font-mono text-3xs leading-relaxed">
-                  <a
-                    href={paper.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-phosphor hover:underline"
-                  >
-                    {paper.title}
-                  </a>
+                  {paper.url ? (
+                    <a
+                      href={paper.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-phosphor hover:underline"
+                    >
+                      {paper.title}
+                    </a>
+                  ) : (
+                    <span className="text-phosphor">{paper.title}</span>
+                  )}
                   <span className="text-edge">
                     {paper.year ? ` · ${paper.year}` : ""}
                     {paper.citation_count ? ` · ${paper.citation_count} citations` : ""}
