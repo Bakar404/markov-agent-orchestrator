@@ -102,7 +102,81 @@ export interface OrchestratorState {
   terminated: boolean;
   termination_reason: string | null;
   latent_hypothesis: number;
+  has_escalated: boolean;
+  solo_steps: number;
+  stall_steps: number;
+  stall: number;
+  needs_evidence: number;
+  needs_execution: number;
+  needs_verification: number;
   features: Record<string, number>;
+}
+
+export interface Strategy {
+  id: string;
+  label: string;
+  policy: string;
+  summary: string;
+  when: string;
+  category: string;
+  paper_query: string;
+  is_control: boolean;
+  escalates: "never" | "always" | "heuristic" | "learned";
+  policy_options: Record<string, unknown>;
+}
+
+export interface PairedStat {
+  mean_delta: number;
+  stderr: number;
+  significant: boolean;
+  n: number;
+  multiple?: number | null;
+}
+
+export interface ArmDelta {
+  paired_seeds: number;
+  note?: string;
+  cost_usd?: PairedStat;
+  latency_ms?: PairedStat;
+  tokens?: PairedStat;
+  steps?: PairedStat;
+  quality?: PairedStat | null;
+}
+
+export interface ExperimentArm {
+  arm: string;
+  policy: string;
+  runs: number;
+  seeds: number[];
+  goal_reached: number;
+  escalated: number;
+  mean_cost_usd: number;
+  mean_latency_ms: number;
+  mean_tokens: number;
+  mean_steps: number;
+  mean_quality: number | null;
+  judged_runs: number;
+  mean_internal_reward: number;
+  run_ids: string[];
+  vs_control: ArmDelta | null;
+}
+
+export interface ExperimentComparison {
+  experiment: string;
+  tasks: string[];
+  control_arm: string | null;
+  arms: ExperimentArm[];
+  verdict: string;
+  caveats: string[];
+}
+
+export interface ExperimentSummary {
+  experiment: string;
+  arms: string[];
+  runs: number;
+  seeds: number[];
+  tasks: string[];
+  has_control: boolean;
 }
 
 export interface RewardBreakdown {
@@ -129,6 +203,9 @@ export interface AgentReport {
   evidence_mass: number;
   correct_evidence: boolean;
   summary: string;
+  source: "simulated" | "live";
+  claimed_hypothesis: number | null;
+  response_excerpt: string;
 }
 
 export interface RunMessage {
@@ -199,7 +276,7 @@ export interface RunSummary {
 }
 
 export interface RunDetail extends RunSummary {
-  config: Record<string, unknown>;
+  config: Record<string, unknown> & { mode?: "sim" | "live"; hypotheses?: string[] };
   state: OrchestratorState;
   initial_state: OrchestratorState;
   preview: RunPreview;

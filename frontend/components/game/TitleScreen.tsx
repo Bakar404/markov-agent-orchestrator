@@ -83,9 +83,9 @@ export function TitleScreen() {
 
         <div className="panel max-w-2xl px-6 py-4 text-center">
           <p className="font-mono text-xs leading-relaxed text-[#a9a3e0]">
-            Six agents. One budget. Every action is sampled from a policy, every outcome is
-            sampled from the environment. Spend wisely, collapse the entropy, and finish before
-            the fuel runs out.
+            One agent starts. Six more wait behind an escalation gate that costs budget to open.
+            Every action is sampled from a policy, every outcome from the environment. Spend
+            wisely, collapse the entropy, and find out whether orchestrating was worth it.
           </p>
         </div>
 

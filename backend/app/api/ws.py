@@ -19,6 +19,7 @@ import contextlib
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..db import session_scope
+from ..services import hub
 from ..services.run_service import RunNotFound, RunService, run_lock
 
 router = APIRouter(tags=["ws"])
@@ -45,7 +46,18 @@ async def run_socket(websocket: WebSocket, run_id: str) -> None:
         await websocket.close()
         return
 
-    await websocket.send_json({"type": "snapshot", "run": detail})
+    # All sends funnel through this lock: the playback loop and the spectator forwarder both
+    # write to the same socket, and interleaved frames would corrupt the stream.
+    send_lock = asyncio.Lock()
+
+    async def send(message: dict) -> None:
+        async with send_lock:
+            await websocket.send_json(message)
+
+    await send({"type": "snapshot", "run": detail})
+
+    queue = hub.subscribe(run_id)
+    forwarder = asyncio.create_task(_forward(queue, send))
 
     playing = False
     interval = 0.7
@@ -65,15 +77,15 @@ async def run_socket(websocket: WebSocket, run_id: str) -> None:
                 if kind == "start":
                     playing = True
                     interval = _clamp_interval(command.get("interval_ms"), interval)
-                    await _emit_status(websocket, run_id, "running", playing, interval)
+                    await _emit_status(send, run_id, "running", playing, interval)
                     continue
                 if kind == "pause":
                     playing = False
-                    await _emit_status(websocket, run_id, "paused", playing, interval)
+                    await _emit_status(send, run_id, "paused", playing, interval)
                     continue
                 if kind == "speed":
                     interval = _clamp_interval(command.get("interval_ms"), interval)
-                    await _emit_status(websocket, run_id, None, playing, interval)
+                    await _emit_status(send, run_id, None, playing, interval)
                     continue
                 if kind == "reset":
                     playing = False
@@ -86,14 +98,12 @@ async def run_socket(websocket: WebSocket, run_id: str) -> None:
                                     command.get("keep_policy_learning", False)
                                 ),
                             )
-                    await websocket.send_json({"type": "snapshot", "run": detail})
+                    await send({"type": "snapshot", "run": detail})
                     continue
                 if kind == "close":
                     break
                 if kind != "step":
-                    await websocket.send_json(
-                        {"type": "error", "detail": f"Unknown command '{kind}'"}
-                    )
+                    await send({"type": "error", "detail": f"Unknown command '{kind}'"})
                     continue
 
             # Either an explicit {"type":"step"} or the playback timer fired.
@@ -103,7 +113,7 @@ async def run_socket(websocket: WebSocket, run_id: str) -> None:
                     engine = svc.engine_for(run_id)
                     if engine.done:
                         playing = False
-                        await websocket.send_json(
+                        await send(
                             {
                                 "type": "terminated",
                                 "run": svc.detail(run_id),
@@ -114,10 +124,10 @@ async def run_socket(websocket: WebSocket, run_id: str) -> None:
                     result = svc.step(run_id)
                     detail = svc.detail(run_id)
 
-            await websocket.send_json({"type": "step", "step": result, "run": detail})
+            await send({"type": "step", "step": result, "run": detail})
             if result["done"]:
                 playing = False
-                await websocket.send_json(
+                await send(
                     {
                         "type": "terminated",
                         "run": detail,
@@ -129,19 +139,31 @@ async def run_socket(websocket: WebSocket, run_id: str) -> None:
         return
     except Exception as exc:  # surface engine errors to the client instead of dropping
         with contextlib.suppress(Exception):
-            await websocket.send_json({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
+            await send({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
     finally:
+        forwarder.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await forwarder
+        hub.unsubscribe(run_id, queue)
         with contextlib.suppress(Exception):
             await websocket.close()
 
 
+async def _forward(queue: asyncio.Queue, send) -> None:
+    """Relay hub events (live steps reported over REST) to this socket."""
+    while True:
+        message = await queue.get()
+        with contextlib.suppress(Exception):
+            await send(message)
+
+
 async def _emit_status(
-    websocket: WebSocket, run_id: str, status: str | None, playing: bool, interval: float
+    send, run_id: str, status: str | None, playing: bool, interval: float
 ) -> None:
     if status:
         with session_scope() as session:
             RunService(session).set_status(run_id, status)
-    await websocket.send_json(
+    await send(
         {
             "type": "status",
             "playing": playing,

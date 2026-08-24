@@ -15,6 +15,14 @@ class RunCreate(BaseModel):
         description="Natural-language description of the task to orchestrate.",
     )
     policy: str = Field("contextual_bandit", description="Policy id from /api/meta/policies.")
+    strategy: str | None = Field(
+        None,
+        max_length=64,
+        description=(
+            "Strategy id from /api/meta/strategies. Sets policy, options and arm name, so "
+            "an experiment arm can be chosen from the research catalog rather than wired by hand."
+        ),
+    )
     seed: int | None = Field(None, ge=0, le=2**31 - 1, description="Omit for a random seed.")
     task_complexity: float = Field(0.55, ge=0.05, le=0.99)
     budget_usd: float = Field(1.20, gt=0.0, le=100.0)
@@ -26,6 +34,86 @@ class RunCreate(BaseModel):
     verification_target: float = Field(0.75, ge=0.0, le=1.0)
     min_steps_before_terminate: int = Field(
         3, ge=0, le=50, description="Steps that must elapse before TERMINATE becomes legal."
+    )
+    mode: Literal["sim", "live"] = Field(
+        "sim",
+        description="'sim' samples outcomes; 'live' waits for real agent invocations via /live.",
+    )
+    hypotheses: list[str] = Field(
+        default_factory=list,
+        max_length=32,
+        description="Named competing answers, one per belief dimension. Live mode only.",
+    )
+    task_shape: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "How this task is shaped: needs_evidence, needs_execution, needs_verification, "
+            "each 0-1. Lets one router specialize per task type. Defaults to 0.5 each."
+        ),
+    )
+    policy_profile: str | None = Field(
+        None,
+        max_length=64,
+        description="Named learned parameters to load at start and update on termination.",
+    )
+    experiment: str | None = Field(
+        None, max_length=64, description="Groups arms of the same A/B comparison."
+    )
+    arm: str | None = Field(
+        None, max_length=64, description="Which arm this run is, e.g. 'control' or 'marl'."
+    )
+    policy_options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra policy constructor arguments, e.g. {'agent_id': 'researcher'}.",
+    )
+
+
+class PolicyProfileReset(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    policy: str = Field(..., min_length=1, max_length=64)
+
+
+class VerdictCreate(BaseModel):
+    """An external judgment of answer quality, which the reward function cannot supply."""
+
+    score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="0-1. Only comparable across arms if the same rubric was applied to each.",
+    )
+    judge: str = Field("human", max_length=64, description="Who scored it.")
+    rubric: str = Field("", max_length=2000, description="What was being scored, and how.")
+    notes: str = Field("", max_length=4000)
+
+
+class LiveAgentReport(BaseModel):
+    """What one real agent invocation produced."""
+
+    agent_id: str = Field(..., description="Agent the brief was issued to.")
+    outcome: Literal["success", "partial", "failure"]
+    confidence: float = Field(
+        0.5, ge=0.0, le=1.0, description="How strongly the agent backs its claim."
+    )
+    claimed_hypothesis: int | None = Field(
+        None,
+        ge=0,
+        description="Index of the hypothesis this response argued for. Omit if it argued for none.",
+    )
+    response: str = Field("", max_length=20000, description="What the agent actually produced.")
+    summary: str = Field("", max_length=400)
+    tokens: int | None = Field(None, ge=0, description="Measured; estimated from the spec if omitted.")
+    latency_ms: float | None = Field(None, ge=0.0)
+    cost_usd: float | None = Field(None, ge=0.0)
+
+
+class LiveReportRequest(BaseModel):
+    token: str = Field(..., description="Token returned by /live/open.")
+    reports: list[LiveAgentReport] = Field(default_factory=list, max_length=8)
+    hypotheses: list[str] = Field(
+        default_factory=list,
+        max_length=32,
+        description="Name the belief slots. Accepted only while they are still unnamed.",
     )
 
 

@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-import { useGame } from "@/lib/store";
+import { isLive, useGame } from "@/lib/store";
 
 const SPEEDS = [
   { label: "0.5x", ms: 1400 },
@@ -27,11 +27,15 @@ export function Controls() {
   } = useGame();
 
   const done = Boolean(run?.terminated);
+  const live = isLive({ run });
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return;
+
+      if (event.key.toLowerCase() === "r") reset();
+      if (live) return;
 
       if (event.code === "Space") {
         event.preventDefault();
@@ -42,51 +46,63 @@ export function Controls() {
         event.preventDefault();
         if (!done && !playing) stepOnce();
       }
-      if (event.key.toLowerCase() === "r") reset();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [playing, done, play, pause, stepOnce, reset]);
+  }, [playing, done, live, play, pause, stepOnce, reset]);
 
   return (
     <div className="panel flex flex-wrap items-center gap-2 px-3 py-2">
-      <button
-        type="button"
-        className={`pixel-btn ${playing ? "" : "pixel-btn-primary"}`}
-        disabled={!connected || done}
-        onClick={() => (playing ? pause() : play())}
-      >
-        {playing ? "❚❚ Pause" : "▶ Start"}
-      </button>
+      {live ? (
+        <div className="flex items-center gap-2 border-2 border-violet px-2 py-1">
+          <span className="font-pixel text-3xs text-violet">◆ LIVE</span>
+          <span className="font-mono text-3xs text-edge">
+            driven by agent chat · steps arrive as they are reported
+          </span>
+        </div>
+      ) : (
+        <>
+          <button
+            type="button"
+            className={`pixel-btn ${playing ? "" : "pixel-btn-primary"}`}
+            disabled={!connected || done}
+            onClick={() => (playing ? pause() : play())}
+          >
+            {playing ? "❚❚ Pause" : "▶ Start"}
+          </button>
 
-      <button
-        type="button"
-        className="pixel-btn"
-        disabled={!connected || done || playing}
-        onClick={stepOnce}
-      >
-        ▶❙ Step
-      </button>
+          <button
+            type="button"
+            className="pixel-btn"
+            disabled={!connected || done || playing}
+            onClick={stepOnce}
+          >
+            ▶❙ Step
+          </button>
+        </>
+      )}
 
       <button type="button" className="pixel-btn" disabled={!connected} onClick={() => reset()}>
         ↺ Reset
       </button>
 
-      <div className="flex items-center gap-1 border-2 border-edge px-2 py-1">
-        <span className="stat-label">Speed</span>
-        {SPEEDS.map((speed) => (
-          <button
-            key={speed.ms}
-            type="button"
-            onClick={() => setSpeed(speed.ms)}
-            className={`px-1 font-pixel text-3xs ${
-              intervalMs === speed.ms ? "text-phosphor" : "text-edge hover:text-violet"
-            }`}
-          >
-            {speed.label}
-          </button>
-        ))}
-      </div>
+      {!live && (
+        <div className="flex items-center gap-1 border-2 border-edge px-2 py-1">
+          <span className="stat-label">Speed</span>
+          {SPEEDS.map((speed) => (
+            <button
+              key={speed.ms}
+              type="button"
+              onClick={() => setSpeed(speed.ms)}
+              className={`px-1 font-pixel text-3xs ${
+                intervalMs === speed.ms ? "text-phosphor" : "text-edge hover:text-violet"
+              }`}
+            >
+              {speed.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <button type="button" className="pixel-btn" onClick={() => void refreshAnalytics()}>
         ⟳ Stats
@@ -102,7 +118,7 @@ export function Controls() {
       </div>
 
       <p className="w-full font-mono text-3xs text-edge">
-        SPACE start/pause · → step · R reset
+        {live ? "R reset · drive the run from your agent chat" : "SPACE start/pause · → step · R reset"}
       </p>
     </div>
   );

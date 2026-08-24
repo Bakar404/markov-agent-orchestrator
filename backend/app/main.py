@@ -8,7 +8,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import campaign_router, meta_router, research_router, runs_router, ws_router
+from .api import (
+    campaign_router,
+    experiments_router,
+    meta_router,
+    profiles_router,
+    research_router,
+    runs_router,
+    ws_router,
+)
 from .config import get_settings
 from .db import init_db, session_scope
 from .research.service import ResearchService
@@ -55,6 +63,8 @@ def create_app() -> FastAPI:
     app.include_router(runs_router)
     app.include_router(research_router)
     app.include_router(campaign_router)
+    app.include_router(profiles_router)
+    app.include_router(experiments_router)
     app.include_router(ws_router)
 
     @app.get("/health", tags=["meta"])

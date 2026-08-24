@@ -39,6 +39,7 @@ class HeuristicPolicy(Policy):
     def score_actions(self, state: OrchestratorState) -> np.ndarray:
         planned = state.step > 0
         scores = {
+            Action.INVOKE_GENERALIST: 1.0,
             Action.INVOKE_PLANNER: 1.4 if not planned else 0.25 + 0.5 * state.unresolved_ratio,
             Action.INVOKE_RESEARCHER: 0.2 + 1.6 * state.uncertainty * state.budget_remaining,
             Action.INVOKE_CRITIC: 0.1 + 1.1 * (1.0 - state.quality) * float(planned),
@@ -46,6 +47,12 @@ class HeuristicPolicy(Policy):
             Action.INVOKE_EXECUTOR: 0.1 + 1.5 * state.unresolved_ratio * state.confidence,
             Action.INVOKE_MEMORY: 0.15 + 1.0 * (1.0 - state.memory_coverage) + state.duplicate_pressure,
             Action.RUN_PARALLEL: 0.1 + 0.9 * state.unresolved_ratio * state.budget_remaining,
+            # Escalate when the solo attempt has stalled or the task is visibly large.
+            Action.ESCALATE: (
+                -0.6
+                + 2.2 * state.stall
+                + 1.4 * state.unresolved_ratio * state.task_complexity
+            ),
             Action.TERMINATE: (
                 -1.5
                 + 3.0 * state.confidence * state.verification_score * (1.0 - state.unresolved_ratio)

@@ -173,7 +173,36 @@ AGENT_SPECS: tuple[AgentSpec, ...] = (
         subtask_resolution=0.85,
         canvas_position=(790.0, 300.0),
     ),
+    AgentSpec(
+        id="generalist",
+        label="Generalist Agent",
+        role="Solo execution",
+        description=(
+            "Works the whole task alone. Competent at everything and excellent at nothing: it "
+            "moves quality, verification and subtasks together, but more slowly per dollar than "
+            "a specialist. This is the agent that runs before the orchestrator escalates."
+        ),
+        color="#e2e8f0",
+        accent="rgba(226,232,240,0.16)",
+        # Costs more than any single specialist because it is doing all of their jobs at once,
+        # but carries no handoff overhead, which is what escalation has to earn back.
+        base_cost_usd=0.052,
+        base_latency_ms=2600.0,
+        base_tokens=4200,
+        prior_alpha=5.0,
+        prior_beta=2.5,
+        evidence_strength=1.1,
+        noise_strength=0.5,
+        quality_gain=0.09,
+        verification_gain=0.07,
+        memory_gain=0.08,
+        subtask_resolution=0.4,
+        canvas_position=(435.0, 40.0),
+    ),
 )
+
+SOLO_AGENT = "generalist"
+"""The agent that acts before escalation. Everything else is unlocked by escalating."""
 
 AGENTS: dict[str, AgentSpec] = {spec.id: spec for spec in AGENT_SPECS}
 AGENT_IDS: tuple[str, ...] = tuple(spec.id for spec in AGENT_SPECS)

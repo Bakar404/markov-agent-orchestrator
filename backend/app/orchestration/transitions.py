@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .actions import Action, SINGLE_AGENT_ACTIONS
-from .agents import AGENTS, AgentSpec
+from .agents import AGENTS, SOLO_AGENT, AgentSpec
 from .entropy import belief_entropy
 from .state import OrchestratorState
 
@@ -42,6 +42,11 @@ class AgentReport:
     evidence_mass: float
     correct_evidence: bool
     summary: str
+    source: str = "simulated"
+    claimed_hypothesis: int | None = None
+    """Live mode only. Which hypothesis the real response argued for; there is no hidden truth
+    to grade against, so belief mass follows the claim and truth emerges from agreement."""
+    response_excerpt: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -55,6 +60,9 @@ class AgentReport:
             "evidence_mass": self.evidence_mass,
             "correct_evidence": self.correct_evidence,
             "summary": self.summary,
+            "source": self.source,
+            "claimed_hypothesis": self.claimed_hypothesis,
+            "response_excerpt": self.response_excerpt,
         }
 
 
@@ -89,12 +97,13 @@ def agents_for_action(
     """Resolve an action to the concrete agent(s) that will be invoked."""
     if action in SINGLE_AGENT_ACTIONS:
         return [SINGLE_AGENT_ACTIONS[action]]
-    if action is Action.TERMINATE:
+    if action in {Action.TERMINATE, Action.ESCALATE}:
         return []
 
     # RUN_PARALLEL: build a coalition. Preference scores come from the policy when it exposes
-    # them (Markov game / MARL); otherwise fall back to a need-based heuristic.
-    scores = dict(preference or {})
+    # them (Markov game / MARL); otherwise fall back to a need-based heuristic. The generalist
+    # is excluded: it exists to work alone, and fanning out to it is what escalation replaced.
+    scores = {k: v for k, v in (preference or {}).items() if k != SOLO_AGENT}
     if not scores:
         scores = {
             "planner": 0.4 + 0.6 * state.unresolved_ratio,
@@ -116,9 +125,18 @@ def agents_for_action(
 class TransitionModel:
     """Samples the successor state. Holds no mutable state of its own."""
 
-    def __init__(self, *, belief_dim: int, stochasticity: float = 1.0) -> None:
+    def __init__(
+        self,
+        *,
+        belief_dim: int,
+        stochasticity: float = 1.0,
+        escalation_cost_usd: float = 0.03,
+        escalation_latency_ms: float = 900.0,
+    ) -> None:
         self.belief_dim = belief_dim
         self.stochasticity = float(np.clip(stochasticity, 0.05, 3.0))
+        self.escalation_cost_usd = float(escalation_cost_usd)
+        self.escalation_latency_ms = float(escalation_latency_ms)
 
     # ------------------------------------------------------------------ core
     def sample(
@@ -129,7 +147,13 @@ class TransitionModel:
         *,
         preference: dict[str, float] | None = None,
         agent_ids: list[str] | None = None,
+        reports_override: list[AgentReport] | None = None,
     ) -> TransitionOutcome:
+        """Draw the successor state.
+
+        ``reports_override`` supplies already-realized reports instead of sampling them, which is
+        how live mode feeds real model invocations through the same state math.
+        """
         entropy_before = state.entropy
         next_state = state.copy()
         next_state.step = state.step + 1
@@ -153,7 +177,40 @@ class TransitionModel:
                 deltas={},
             )
 
-        resolved_agents = agent_ids if agent_ids else agents_for_action(action, state, rng, preference)
+        if action is Action.ESCALATE:
+            # Decomposition is real work: it costs money and time but resolves nothing by itself.
+            next_state.has_escalated = True
+            next_state.stall_steps = 0
+            next_state.budget_spent_usd = state.budget_spent_usd + self.escalation_cost_usd
+            next_state.latency_consumed_ms = (
+                state.latency_consumed_ms + self.escalation_latency_ms
+            )
+            next_state.last_agents = []
+            return TransitionOutcome(
+                next_state=next_state,
+                reports=[],
+                outcome="escalated",
+                transition_probability=1.0,
+                entropy_before=entropy_before,
+                entropy_after=entropy_before,
+                information_gain=0.0,
+                cost_usd=self.escalation_cost_usd,
+                latency_ms=self.escalation_latency_ms,
+                tokens=0,
+                duplicate_penalty=0.0,
+                resolved_subtasks=0,
+                deltas={},
+            )
+
+        if reports_override is not None:
+            resolved_agents = [report.agent_id for report in reports_override]
+            override_by_agent = {report.agent_id: report for report in reports_override}
+        else:
+            resolved_agents = agent_ids if agent_ids else agents_for_action(
+                action, state, rng, preference
+            )
+            override_by_agent = {}
+
         reports: list[AgentReport] = []
         belief = next_state.belief_array.copy()
 
@@ -168,7 +225,7 @@ class TransitionModel:
 
         for agent_id in resolved_agents:
             spec = AGENTS[agent_id]
-            report = self._invoke(spec, next_state, rng)
+            report = override_by_agent.get(agent_id) or self._invoke(spec, next_state, rng)
             reports.append(report)
 
             total_cost += report.cost_usd
@@ -237,6 +294,13 @@ class TransitionModel:
             np.clip(0.72 * state.duplicate_pressure + duplicate_penalty, 0.0, 1.0)
         )
         next_state.last_agents = list(resolved_agents)
+
+        if not next_state.has_escalated:
+            next_state.solo_steps = state.solo_steps + 1
+
+        # A step that moved neither the artifact nor the belief is the escalation signal.
+        moved = (next_state.quality - state.quality) > 0.01 or information_gain > 0.02
+        next_state.stall_steps = 0 if moved else state.stall_steps + 1
 
         outcome = self._aggregate_outcome(reports)
         transition_probability = float(np.prod([r.outcome_probability for r in reports])) if reports else 1.0
@@ -317,13 +381,16 @@ class TransitionModel:
         rng: np.random.Generator,
     ) -> np.ndarray:
         dim = belief.size
-        truth = state.latent_hypothesis
         update = np.zeros(dim, dtype=float)
 
-        if report.correct_evidence:
-            update[truth] += report.evidence_mass
+        if report.claimed_hypothesis is not None:
+            # Live mode: no hidden truth exists, so mass follows the claim. Agents that disagree
+            # push mass to different slots, which raises entropy exactly as it should.
+            update[int(np.clip(report.claimed_hypothesis, 0, dim - 1))] += report.evidence_mass
+        elif report.correct_evidence:
+            update[state.latent_hypothesis] += report.evidence_mass
         else:
-            wrong = [i for i in range(dim) if i != truth]
+            wrong = [i for i in range(dim) if i != state.latent_hypothesis]
             update[int(rng.choice(wrong))] += report.evidence_mass * 0.7
 
         # Every agent also emits diffuse noise, but its weight decays as evidence accumulates:
@@ -376,7 +443,10 @@ class TransitionModel:
         repeats = recent.count(signature)
         stale = max(0.0, 0.08 - information_gain) / 0.08
         overlap = len(set(agent_ids) & set(state.last_agents)) / max(len(agent_ids), 1)
-        penalty = float(np.clip(0.35 * repeats + 0.45 * stale * overlap, 0.0, 1.0))
+        # Both terms are gated on staleness: repeating an agent that is still producing
+        # information is not duplicate work, and punishing it taught policies to quit rather
+        # than to press a productive line of attack.
+        penalty = float(np.clip(stale * (0.35 * repeats + 0.45 * overlap), 0.0, 1.0))
         signatures = (state.invocation_signatures + [signature])[-12:]
         return penalty, signatures
 
@@ -394,6 +464,7 @@ class TransitionModel:
     @staticmethod
     def _summary(spec: AgentSpec, outcome: str, state: OrchestratorState) -> str:
         verb = {
+            "generalist": ("worked the task end to end", "made partial headway alone", "got stuck working alone"),
             "planner": ("decomposed the frontier into concrete subtasks", "produced a partial plan", "returned an incoherent plan"),
             "researcher": ("retrieved corroborating evidence", "retrieved weakly relevant sources", "retrieved nothing usable"),
             "critic": ("identified and closed a failure mode", "raised an unresolved objection", "misread the artifact"),

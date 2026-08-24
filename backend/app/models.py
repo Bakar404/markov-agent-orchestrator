@@ -240,3 +240,57 @@ class ProviderQuery(Base):
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PolicyProfile(Base):
+    """Learned policy parameters that outlive a single episode.
+
+    A run constructs a fresh policy by default, so nothing carries between tasks. A profile is
+    the router's memory: train it in simulation with tools/campaign.py, then load it to route
+    real work. ``signature`` pins the shapes the weights were fitted for, because LinUCB's ridge
+    matrices are feature_dim x feature_dim and silently loading a stale one would corrupt it.
+    """
+
+    __tablename__ = "policy_profiles"
+    __table_args__ = (UniqueConstraint("name", "policy", name="uq_profile_name_policy"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy: Mapped[str] = mapped_column(String(64), nullable=False)
+    signature: Mapped[str] = mapped_column(String(128), nullable=False)
+    state: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    episodes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_steps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cumulative_reward: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    mean_episode_reward: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class RunVerdict(Base):
+    """An external judgment of how good a run's answer was.
+
+    Cost, latency and tokens are measured automatically, but they only tell you what an arm
+    *spent*. Whether the answer improved has to come from outside the reward function, which
+    rewards belief collapse and would otherwise let orchestration win by construction.
+
+    Kept in its own table rather than as columns on ``runs`` so the schema stays additive:
+    ``create_all`` creates new tables but will not add columns to an existing one.
+    """
+
+    __tablename__ = "run_verdicts"
+    __table_args__ = (UniqueConstraint("run_id", "judge", name="uq_verdict_run_judge"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    judge: Mapped[str] = mapped_column(String(64), nullable=False, default="human")
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    """0-1. Comparable across arms only if the same rubric was applied to each."""
+    rubric: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

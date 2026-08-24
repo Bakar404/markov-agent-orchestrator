@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_session
-from ..schemas import RunCreate, RunResetRequest, RunStatusUpdate, RunStepRequest
+from ..models import Run, RunVerdict
+from ..schemas import (
+    LiveReportRequest,
+    RunCreate,
+    RunResetRequest,
+    RunStatusUpdate,
+    RunStepRequest,
+    VerdictCreate,
+)
+from ..services import hub
 from ..services.run_service import RunNotFound, RunService
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -51,6 +61,88 @@ def step_run(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"run": svc.detail(run_id), "steps": results}
+
+
+@router.post("/{run_id}/live/open")
+def live_open(run_id: str, svc: RunService = Depends(service)) -> dict:
+    """Ask the policy who acts next. Returns briefs; does not advance the episode."""
+    try:
+        return svc.live_open(run_id)
+    except RunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/live/report")
+def live_report(
+    run_id: str, payload: LiveReportRequest, svc: RunService = Depends(service)
+) -> dict:
+    """Fold what the agents actually produced into the episode and advance one step."""
+    try:
+        result = svc.live_report(
+            run_id, payload.token, payload.reports, payload.hypotheses or None
+        )
+    except RunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    detail = svc.detail(run_id)
+    # Spectators watch over the WebSocket, which never saw this step because it arrived by REST.
+    hub.publish(run_id, {"type": "step", "step": result, "run": detail})
+    if result["done"]:
+        hub.publish(
+            run_id,
+            {
+                "type": "terminated",
+                "run": detail,
+                "reason": result["termination_reason"],
+            },
+        )
+    return {"run": detail, "step": result}
+
+
+@router.post("/{run_id}/live/abandon", status_code=204)
+def live_abandon(run_id: str, svc: RunService = Depends(service)) -> None:
+    try:
+        svc.live_abandon(run_id)
+    except RunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/verdict", status_code=201)
+def score_run(
+    run_id: str, payload: VerdictCreate, session: Session = Depends(get_session)
+) -> dict:
+    """Record how good this run's answer was.
+
+    Cost and tokens are measured automatically; quality cannot be, because the reward function
+    pays for belief collapse and would let orchestration win by construction.
+    """
+    if session.get(Run, run_id) is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
+    existing = session.scalar(
+        select(RunVerdict).where(
+            RunVerdict.run_id == run_id, RunVerdict.judge == payload.judge
+        )
+    )
+    verdict = existing or RunVerdict(run_id=run_id, judge=payload.judge)
+    verdict.score = payload.score
+    verdict.rubric = payload.rubric
+    verdict.notes = payload.notes
+    session.add(verdict)
+    session.commit()
+
+    return {
+        "run_id": run_id,
+        "judge": verdict.judge,
+        "score": verdict.score,
+        "rubric": verdict.rubric,
+    }
 
 
 @router.post("/{run_id}/reset")

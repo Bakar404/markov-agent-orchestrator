@@ -1,189 +1,205 @@
-﻿{
-    "generator":  "pixellab-mcp",
-    "generatedAt":  "2026-08-20",
-    "note":  "Mr. Robot themed roster. create_character (standard, 4 directions, chibi, low top-down) at 1 generation each, plus template animations at 1 generation per direction. Regenerate with scripts/fetch-sprites.ps1.",
-    "sprites":  {
-                    "planner":  {
-                                    "src":  "/sprites/planner.png",
-                                    "size":  68,
-                                    "description":  "Hooded hacker, hood up, face in shadow",
-                                    "animations":  {
-                                                       "attack":  {
-                                                                      "frames":  [
-                                                                                     "/sprites/planner-attack-0.png",
-                                                                                     "/sprites/planner-attack-1.png",
-                                                                                     "/sprites/planner-attack-2.png",
-                                                                                     "/sprites/planner-attack-3.png",
-                                                                                     "/sprites/planner-attack-4.png",
-                                                                                     "/sprites/planner-attack-5.png",
-                                                                                     "/sprites/planner-attack-6.png"
-                                                                                 ],
-                                                                      "fps":  14,
-                                                                      "once":  true
-                                                                  },
-                                                       "idle":  {
-                                                                    "frames":  [
-                                                                                   "/sprites/planner-idle-0.png",
-                                                                                   "/sprites/planner-idle-1.png",
-                                                                                   "/sprites/planner-idle-2.png",
-                                                                                   "/sprites/planner-idle-3.png"
-                                                                               ],
-                                                                    "fps":  6
-                                                                }
-                                                   }
-                                },
-                    "researcher":  {
-                                       "src":  "/sprites/researcher.png",
-                                       "size":  68,
-                                       "description":  "Short dark hair, black leather jacket, headphones",
-                                       "animations":  {
-                                                          "attack":  {
-                                                                         "frames":  [
-                                                                                        "/sprites/researcher-attack-0.png",
-                                                                                        "/sprites/researcher-attack-1.png",
-                                                                                        "/sprites/researcher-attack-2.png",
-                                                                                        "/sprites/researcher-attack-3.png",
-                                                                                        "/sprites/researcher-attack-4.png",
-                                                                                        "/sprites/researcher-attack-5.png"
-                                                                                    ],
-                                                                         "fps":  14,
-                                                                         "once":  true
-                                                                     },
-                                                          "idle":  {
-                                                                       "frames":  [
-                                                                                      "/sprites/researcher-idle-0.png",
-                                                                                      "/sprites/researcher-idle-1.png",
-                                                                                      "/sprites/researcher-idle-2.png",
-                                                                                      "/sprites/researcher-idle-3.png"
-                                                                                  ],
-                                                                       "fps":  6
-                                                                   }
-                                                      }
-                                   },
-                    "critic":  {
-                                   "src":  "/sprites/critic.png",
-                                   "size":  68,
-                                   "description":  "Corporate executive, navy suit, slicked blond hair",
-                                   "animations":  {
-                                                      "attack":  {
-                                                                     "frames":  [
-                                                                                    "/sprites/critic-attack-0.png",
-                                                                                    "/sprites/critic-attack-1.png",
-                                                                                    "/sprites/critic-attack-2.png",
-                                                                                    "/sprites/critic-attack-3.png",
-                                                                                    "/sprites/critic-attack-4.png",
-                                                                                    "/sprites/critic-attack-5.png"
-                                                                                ],
-                                                                     "fps":  14,
-                                                                     "once":  true
-                                                                 },
-                                                      "idle":  {
-                                                                   "frames":  [
-                                                                                  "/sprites/critic-idle-0.png",
-                                                                                  "/sprites/critic-idle-1.png",
-                                                                                  "/sprites/critic-idle-2.png",
-                                                                                  "/sprites/critic-idle-3.png"
-                                                                              ],
-                                                                   "fps":  6
-                                                               }
-                                                  }
-                               },
-                    "verifier":  {
-                                     "src":  "/sprites/verifier.png",
-                                     "size":  68,
-                                     "description":  "Security analyst, white shirt and tie, ID lanyard",
-                                     "animations":  {
-                                                        "attack":  {
-                                                                       "frames":  [
-                                                                                      "/sprites/verifier-attack-0.png",
-                                                                                      "/sprites/verifier-attack-1.png",
-                                                                                      "/sprites/verifier-attack-2.png",
-                                                                                      "/sprites/verifier-attack-3.png",
-                                                                                      "/sprites/verifier-attack-4.png",
-                                                                                      "/sprites/verifier-attack-5.png",
-                                                                                      "/sprites/verifier-attack-6.png"
-                                                                                  ],
-                                                                       "fps":  14,
-                                                                       "once":  true
-                                                                   },
-                                                        "idle":  {
-                                                                     "frames":  [
-                                                                                    "/sprites/verifier-idle-0.png",
-                                                                                    "/sprites/verifier-idle-1.png",
-                                                                                    "/sprites/verifier-idle-2.png",
-                                                                                    "/sprites/verifier-idle-3.png"
-                                                                                ],
-                                                                     "fps":  6
-                                                                 }
-                                                    }
-                                 },
-                    "memory":  {
-                                   "src":  "/sprites/memory.png",
-                                   "size":  68,
-                                   "description":  "Server technician, grey jumpsuit, coiled cable",
-                                   "animations":  {
-                                                      "attack":  {
-                                                                     "frames":  [
-                                                                                    "/sprites/memory-attack-0.png",
-                                                                                    "/sprites/memory-attack-1.png",
-                                                                                    "/sprites/memory-attack-2.png",
-                                                                                    "/sprites/memory-attack-3.png",
-                                                                                    "/sprites/memory-attack-4.png"
-                                                                                ],
-                                                                     "fps":  14,
-                                                                     "once":  true
-                                                                 },
-                                                      "idle":  {
-                                                                   "frames":  [
-                                                                                  "/sprites/memory-idle-0.png",
-                                                                                  "/sprites/memory-idle-1.png",
-                                                                                  "/sprites/memory-idle-2.png",
-                                                                                  "/sprites/memory-idle-3.png"
-                                                                              ],
-                                                                   "fps":  6
-                                                               }
-                                                  }
-                               },
-                    "executor":  {
-                                     "src":  "/sprites/executor.png",
-                                     "size":  68,
-                                     "description":  "Hacker in a black hoodie carrying a laptop",
-                                     "animations":  {
-                                                        "attack":  {
-                                                                       "frames":  [
-                                                                                      "/sprites/executor-attack-0.png",
-                                                                                      "/sprites/executor-attack-1.png",
-                                                                                      "/sprites/executor-attack-2.png"
-                                                                                  ],
-                                                                       "fps":  14,
-                                                                       "once":  true
-                                                                   },
-                                                        "idle":  {
-                                                                     "frames":  [
-                                                                                    "/sprites/executor-idle-0.png",
-                                                                                    "/sprites/executor-idle-1.png",
-                                                                                    "/sprites/executor-idle-2.png",
-                                                                                    "/sprites/executor-idle-3.png"
-                                                                                ],
-                                                                     "fps":  6
-                                                                 }
-                                                    }
-                                 },
-                    "orchestrator":  {
-                                         "src":  "/sprites/orchestrator.png",
-                                         "size":  68,
-                                         "description":  "Weathered figure in a worn dark jacket and cap",
-                                         "animations":  {
-                                                            "idle":  {
-                                                                         "frames":  [
-                                                                                        "/sprites/orchestrator-idle-0.png",
-                                                                                        "/sprites/orchestrator-idle-1.png",
-                                                                                        "/sprites/orchestrator-idle-2.png",
-                                                                                        "/sprites/orchestrator-idle-3.png"
-                                                                                    ],
-                                                                         "fps":  6
-                                                                     }
-                                                        }
-                                     }
-                }
+{
+  "generator": "pixellab-mcp",
+  "generatedAt": "2026-08-23",
+  "note": "Mr. Robot themed roster. create_character (standard, 4 directions, chibi, low top-down) at 1 generation each, plus template animations at 1 generation per direction. Regenerate with scripts/fetch-sprites.ps1.",
+  "sprites": {
+    "generalist": {
+      "src": "/sprites/generalist.png",
+      "size": 68,
+      "description": "Lone operator in an olive field jacket, beanie and satchel",
+      "animations": {
+        "idle": {
+          "frames": [
+            "/sprites/generalist-idle-0.png",
+            "/sprites/generalist-idle-1.png",
+            "/sprites/generalist-idle-2.png",
+            "/sprites/generalist-idle-3.png"
+          ],
+          "fps": 6
+        }
+      }
+    },
+    "planner": {
+      "src": "/sprites/planner.png",
+      "size": 68,
+      "description": "Hooded hacker, hood up, face in shadow",
+      "animations": {
+        "attack": {
+          "frames": [
+            "/sprites/planner-attack-0.png",
+            "/sprites/planner-attack-1.png",
+            "/sprites/planner-attack-2.png",
+            "/sprites/planner-attack-3.png",
+            "/sprites/planner-attack-4.png",
+            "/sprites/planner-attack-5.png",
+            "/sprites/planner-attack-6.png"
+          ],
+          "fps": 14,
+          "once": true
+        },
+        "idle": {
+          "frames": [
+            "/sprites/planner-idle-0.png",
+            "/sprites/planner-idle-1.png",
+            "/sprites/planner-idle-2.png",
+            "/sprites/planner-idle-3.png"
+          ],
+          "fps": 6
+        }
+      }
+    },
+    "researcher": {
+      "src": "/sprites/researcher.png",
+      "size": 68,
+      "description": "Short dark hair, black leather jacket, headphones",
+      "animations": {
+        "attack": {
+          "frames": [
+            "/sprites/researcher-attack-0.png",
+            "/sprites/researcher-attack-1.png",
+            "/sprites/researcher-attack-2.png",
+            "/sprites/researcher-attack-3.png",
+            "/sprites/researcher-attack-4.png",
+            "/sprites/researcher-attack-5.png"
+          ],
+          "fps": 14,
+          "once": true
+        },
+        "idle": {
+          "frames": [
+            "/sprites/researcher-idle-0.png",
+            "/sprites/researcher-idle-1.png",
+            "/sprites/researcher-idle-2.png",
+            "/sprites/researcher-idle-3.png"
+          ],
+          "fps": 6
+        }
+      }
+    },
+    "critic": {
+      "src": "/sprites/critic.png",
+      "size": 68,
+      "description": "Corporate executive, navy suit, slicked blond hair",
+      "animations": {
+        "attack": {
+          "frames": [
+            "/sprites/critic-attack-0.png",
+            "/sprites/critic-attack-1.png",
+            "/sprites/critic-attack-2.png",
+            "/sprites/critic-attack-3.png",
+            "/sprites/critic-attack-4.png",
+            "/sprites/critic-attack-5.png"
+          ],
+          "fps": 14,
+          "once": true
+        },
+        "idle": {
+          "frames": [
+            "/sprites/critic-idle-0.png",
+            "/sprites/critic-idle-1.png",
+            "/sprites/critic-idle-2.png",
+            "/sprites/critic-idle-3.png"
+          ],
+          "fps": 6
+        }
+      }
+    },
+    "verifier": {
+      "src": "/sprites/verifier.png",
+      "size": 68,
+      "description": "Security analyst, white shirt and tie, ID lanyard",
+      "animations": {
+        "attack": {
+          "frames": [
+            "/sprites/verifier-attack-0.png",
+            "/sprites/verifier-attack-1.png",
+            "/sprites/verifier-attack-2.png",
+            "/sprites/verifier-attack-3.png",
+            "/sprites/verifier-attack-4.png",
+            "/sprites/verifier-attack-5.png",
+            "/sprites/verifier-attack-6.png"
+          ],
+          "fps": 14,
+          "once": true
+        },
+        "idle": {
+          "frames": [
+            "/sprites/verifier-idle-0.png",
+            "/sprites/verifier-idle-1.png",
+            "/sprites/verifier-idle-2.png",
+            "/sprites/verifier-idle-3.png"
+          ],
+          "fps": 6
+        }
+      }
+    },
+    "memory": {
+      "src": "/sprites/memory.png",
+      "size": 68,
+      "description": "Server technician, grey jumpsuit, coiled cable",
+      "animations": {
+        "attack": {
+          "frames": [
+            "/sprites/memory-attack-0.png",
+            "/sprites/memory-attack-1.png",
+            "/sprites/memory-attack-2.png",
+            "/sprites/memory-attack-3.png",
+            "/sprites/memory-attack-4.png"
+          ],
+          "fps": 14,
+          "once": true
+        },
+        "idle": {
+          "frames": [
+            "/sprites/memory-idle-0.png",
+            "/sprites/memory-idle-1.png",
+            "/sprites/memory-idle-2.png",
+            "/sprites/memory-idle-3.png"
+          ],
+          "fps": 6
+        }
+      }
+    },
+    "executor": {
+      "src": "/sprites/executor.png",
+      "size": 68,
+      "description": "Hacker in a black hoodie carrying a laptop",
+      "animations": {
+        "attack": {
+          "frames": [
+            "/sprites/executor-attack-0.png",
+            "/sprites/executor-attack-1.png",
+            "/sprites/executor-attack-2.png"
+          ],
+          "fps": 14,
+          "once": true
+        },
+        "idle": {
+          "frames": [
+            "/sprites/executor-idle-0.png",
+            "/sprites/executor-idle-1.png",
+            "/sprites/executor-idle-2.png",
+            "/sprites/executor-idle-3.png"
+          ],
+          "fps": 6
+        }
+      }
+    },
+    "orchestrator": {
+      "src": "/sprites/orchestrator.png",
+      "size": 68,
+      "description": "Weathered figure in a worn dark jacket and cap",
+      "animations": {
+        "idle": {
+          "frames": [
+            "/sprites/orchestrator-idle-0.png",
+            "/sprites/orchestrator-idle-1.png",
+            "/sprites/orchestrator-idle-2.png",
+            "/sprites/orchestrator-idle-3.png"
+          ],
+          "fps": 6
+        }
+      }
+    }
+  }
 }

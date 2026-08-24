@@ -7,6 +7,7 @@ import { useGame } from "@/lib/store";
 import type { AgentSpec } from "@/lib/types";
 
 const RING_ORDER = ["planner", "researcher", "critic", "verifier", "memory", "executor"];
+const SOLO_AGENT = "generalist";
 
 interface FloatingNumber {
   key: string;
@@ -14,7 +15,7 @@ interface FloatingNumber {
   value: number;
 }
 
-/** Positions the six agents evenly on a ring around the core. */
+/** Positions the specialists evenly on a ring around the core. */
 function ringPosition(index: number, total: number) {
   const angle = (index / total) * Math.PI * 2 - Math.PI / 2;
   return {
@@ -27,10 +28,19 @@ export function Arena() {
   const { run, lastStep, activeAgents, combo } = useGame();
   const [floats, setFloats] = useState<FloatingNumber[]>([]);
 
-  const agents = useMemo(() => {
-    const byId = new Map((run?.agents ?? []).map((a) => [a.id, a]));
-    return RING_ORDER.map((id) => byId.get(id)).filter(Boolean) as AgentSpec[];
-  }, [run?.agents]);
+  const state = run?.state;
+  // Before escalation the generalist works alone; the specialists have not been paid for yet.
+  const escalated = Boolean(state?.has_escalated);
+
+  const byId = useMemo(
+    () => new Map((run?.agents ?? []).map((a) => [a.id, a])),
+    [run?.agents],
+  );
+  const solo = byId.get(SOLO_AGENT);
+  const agents = useMemo(
+    () => (escalated ? (RING_ORDER.map((id) => byId.get(id)).filter(Boolean) as AgentSpec[]) : []),
+    [byId, escalated],
+  );
 
   // Spawn a damage-number style readout for each agent that acted this step.
   useEffect(() => {
@@ -48,9 +58,9 @@ export function Arena() {
     return () => clearTimeout(timer);
   }, [lastStep]);
 
-  const state = run?.state;
   const fog = state ? state.uncertainty : 1;
   const coreHealth = state ? state.confidence : 0;
+  const stall = state?.stall ?? 0;
 
   return (
     <div className="panel relative h-full min-h-[26rem] overflow-hidden">
@@ -64,6 +74,21 @@ export function Arena() {
       <div className="absolute left-3 top-3 z-30">
         <p className="stat-label">Entropy fog</p>
         <p className="font-pixel text-2xs text-cyan">{(fog * 100).toFixed(0)}%</p>
+        <p className="mt-2 stat-label">Mode</p>
+        <p className={`font-pixel text-3xs ${escalated ? "text-violet" : "text-phosphor"}`}>
+          {escalated ? "ORCHESTRATED" : "SOLO"}
+        </p>
+        {!escalated ? (
+          <>
+            <p className="mt-2 stat-label">Stall</p>
+            <div className="meter mt-1 w-20">
+              <div
+                className="meter-fill"
+                style={{ width: `${Math.round(stall * 100)}%`, color: "#ff5f6d" }}
+              />
+            </div>
+          </>
+        ) : null}
       </div>
 
       {combo > 1 ? (
@@ -79,9 +104,15 @@ export function Arena() {
           {activeAgents.length > 0 ? (
             <span className="absolute inset-0 animate-pulse-ring border-2 border-phosphor" />
           ) : null}
-          <PixelSprite id="orchestrator" size={96} animation="idle" />
+          <PixelSprite
+            id={escalated ? "orchestrator" : SOLO_AGENT}
+            size={96}
+            animation="idle"
+          />
         </div>
-        <p className="mt-1 font-pixel text-3xs text-phosphor">CORE</p>
+        <p className="mt-1 font-pixel text-3xs text-phosphor">
+          {escalated ? "ORCHESTRATOR" : (solo?.label ?? "GENERALIST").toUpperCase()}
+        </p>
         <div className="meter mx-auto mt-1 w-24">
           <div
             className="meter-fill text-phosphor"
