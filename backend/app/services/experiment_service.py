@@ -81,13 +81,16 @@ class ExperimentService:
             else:
                 arm["vs_control"] = self._paired_delta(by_arm[arm["arm"]], control, verdicts)
 
+        modes = sorted({self._mode_of(r) for r in runs})
         return {
             "experiment": experiment,
             "tasks": sorted({run.task for run in runs}),
             "control_arm": CONTROL_ARM if control else None,
+            "modes": modes,
+            "mode": modes[0] if len(modes) == 1 else "mixed",
             "arms": arms,
             "verdict": self._headline(arms),
-            "caveats": self._caveats(arms, control),
+            "caveats": self._caveats(arms, control, modes),
         }
 
     def _pairwise(self, experiment: str, arm_of_run: dict[str, str]) -> dict[str, dict]:
@@ -144,6 +147,10 @@ class ExperimentService:
     def _arm_of(run: Run) -> str:
         return str((run.config or {}).get("arm") or run.policy)
 
+    @staticmethod
+    def _mode_of(run: Run) -> str:
+        return str((run.config or {}).get("mode") or "sim")
+
     def _verdicts_for(self, run_ids: list[str]) -> dict[str, float]:
         if not run_ids:
             return {}
@@ -172,6 +179,7 @@ class ExperimentService:
             "policy": members[0].policy,
             "runs": len(members),
             "seeds": sorted({r.seed for r in members}),
+            "modes": sorted({self._mode_of(r) for r in members}),
             "goal_reached": sum(1 for r in members if r.termination_reason == "goal_reached"),
             "escalated": sum(1 for r in members if (r.current_state or {}).get("has_escalated")),
             "mean_quality": statistics.mean(scored) if scored else None,
@@ -296,8 +304,23 @@ class ExperimentService:
         )
 
     @staticmethod
-    def _caveats(arms: list[dict], control: list[Run] | None) -> list[str]:
+    def _caveats(arms: list[dict], control: list[Run] | None, modes: list[str]) -> list[str]:
         notes: list[str] = []
+
+        # Sampled outcomes look identical to measured ones downstream, so say which this is.
+        if modes == ["sim"]:
+            notes.append(
+                "SIMULATED: every run here sampled its outcomes from the model of the task, not "
+                "from an agent doing the work. Useful for checking the mechanism; it is not "
+                "evidence about real agents."
+            )
+        elif len(modes) > 1:
+            notes.append(
+                f"MIXED MODES: this experiment contains both {' and '.join(modes)} runs. Paired "
+                "differences across them compare sampled outcomes against real ones and mean "
+                "nothing. Split the experiment by mode."
+            )
+
         if control is None:
             notes.append(
                 "No arm is named 'control'. Without a single-agent baseline there is nothing to "
