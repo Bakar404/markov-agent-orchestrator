@@ -3,19 +3,30 @@ title: Markov Agent Orchestrator
 description: An experiment harness that answers whether multi-agent orchestration beats a single agent on your task, with a pixel-art arena that shows the decisions being made and paid for.
 ---
 
-# Markov Agent Orchestrator
+## What this is
 
 Most multi-agent frameworks assume the answer. They hard-code a workflow — planner, then researcher, then critic — and never ask whether any of it beat one agent doing the work alone.
 
 This asks. One generalist starts the task; if it stalls, a policy decides whether to **escalate** into orchestration. Every arm is measured against a single-agent control on the same seeds. Then it renders the whole thing as a playable pixel-art game, so you can watch orchestration being bought.
 
-```text
-        ◇ solo                     one agent, no routing decision
-        ↓ escalate?                the decision under uncertainty
-  ┌─ Planner ─┐                    specialists appear only once bought
-Research   Critic         ◄──►     entropy fog clears as the belief sharpens
-  └─ Verifier ┘                    every number traces to a persisted step
+```mermaid
+flowchart LR
+    T["Task<br/>4 competing hypotheses<br/>seed 101"]
+
+    T --> C["control<br/>one agent<br/>never escalates"]
+    T --> O["orchestrated<br/>escalates to specialists"]
+
+    C --> A["Answer A<br/>cost and tokens measured"]
+    O --> B["Answer B<br/>cost and tokens measured"]
+
+    A --> J{"Blind judge<br/>labels stripped<br/>order randomised"}
+    B --> J
+
+    J --> V["win · loss · tie"]
+    V --> N["repeat on seeds 102-105<br/>five pairs minimum"]
 ```
+
+The fork is the only difference between the arms, and the judge never learns which is which.
 
 ## The question it answers
 
@@ -37,18 +48,35 @@ Three properties drive every design choice:
 
 A run starts solo. `ESCALATE` is the only other legal action until it fires, after which the specialists unlock. That makes "should I orchestrate at all" the first decision under uncertainty rather than an assumption.
 
-40 episodes, identical seeds and budget:
+```mermaid
+flowchart TD
+    A["Step 1 — one generalist attempts the whole task"] --> B{"Escalation gate<br/>opening it costs budget"}
+    B -->|"control: never opens"| C["Stays solo for every remaining step"]
+    B -->|"orchestrated: opens once earned"| D["Roster unlocks<br/>planner · researcher · critic<br/>verifier · memory · executor"]
+    C --> E["Final answer"]
+    D --> E
+```
 
-| Strategy | Policy | Reward | Win | Escalated | At step |
-| --- | --- | --- | --- | --- | --- |
-| `control` | `single_agent` | −9.44 | 2% | **0%** | — |
-| `cascade` | `heuristic` | −3.62 | 0% | **62%** | 5.0 |
-| `always_orchestrate` | `fixed_sequence` | **+4.24** | **12%** | 100% | 2.0 |
-| — | `contextual_bandit` | +2.84 | 0% | 100% | 2.0 |
-| — | `mdp` | +1.21 | 2% | 100% | 3.0 |
-| — | `marl` | +0.91 | 0% | 100% | 3.1 |
+40 episodes, identical seeds and budget, `python -m tools.balance --episodes 40`:
 
-**Every learned policy pins the gate at 100%.** Only the hand-written cascade uses it selectively, and only the hardcoded pipeline wins. The learned policies did not learn a gate; they learned "always", which is one of the two bookends they were supposed to beat.
+| Policy | Reward | Win | Steps | How episodes ended |
+| --- | --- | --- | --- | --- |
+| `fixed_sequence` | **+4.09** | **20%** | 31.3 | budget 32, **goal 8** |
+| `contextual_bandit` | +2.57 | 0% | 14.3 | quit 40 |
+| `markov_game` | +1.20 | 0% | 18.9 | quit 40 |
+| `marl` | +1.16 | 0% | 19.5 | quit 40 |
+| `mdp` | +0.94 | 2% | 20.4 | quit 32, budget 7, goal 1 |
+| `random` | +0.78 | **5%** | 21.7 | quit 31, budget 7, goal 2 |
+| `heuristic` | −3.61 | 0% | 23.1 | quit 38 |
+| `single_agent` | −8.82 | 0% | 18.7 | budget 40 |
+
+Two results worth reading twice.
+
+**The hardcoded pipeline beats every learned policy.** No exceptions, on reward and on win rate.
+
+**`random` reaches the goal more often than any learned policy.** It wins 5% against 0%, 0%, 0% and 2%. A policy that picks uniformly is outperforming four that were trained.
+
+The cause is visible in the last two columns: the learned policies terminate voluntarily in all forty episodes, at a final confidence near 0.34 against a target of 0.55. They are not learning to route. They are learning to stop, because continuing is worth less than quitting given the agents they choose.
 
 That is the open problem this repository is currently pointed at. It is stated here rather than buried, because the harness is what found it.
 
@@ -133,6 +161,8 @@ A **strategy** is a policy plus the configuration that makes it a coherent appro
 | `learned_marl` | learned | VDN mixing with difference rewards |
 
 `GET /api/meta` returns the catalog; `POST /api/runs` accepts a `strategy` id and derives the policy, its options and the arm name.
+
+`GET /api/meta/strategies/{id}/papers` returns the papers a strategy implements, drawn from the live library and reordered by overlap with its paper query. It resolves well: `learned_bandit` to Li et al., `learned_marl` to the value-decomposition paper, `learned_markov_game` to Nash-Q and Shapley's *Stochastic Games*. The control returns nothing and says why — it was picking up an orchestration paper purely because it shares the routing tag, and citing that beside a single-agent baseline would be wrong.
 
 ## User workflow
 
@@ -237,6 +267,52 @@ Then open `/compare`, or `GET /api/experiments/worth-it`. The response carries p
 
 What it will not do is rank arms on internal reward. If you want a number that says orchestration won, you have to supply a verdict.
 
+### Why the same seed on every arm
+
+The seed does not control your work. It controls the world's reaction to it.
+
+```mermaid
+flowchart LR
+    W["You report<br/>outcome · confidence<br/>hypothesis · the answer"] --> ST["Next state"]
+    R["Seed rolls<br/>quality multiplier 0.7-1.3<br/>subtasks resolved<br/>belief mass 0.75-1.35<br/>cost · latency · tokens"] --> ST
+    ST --> N["Same seed on both arms<br/>= same rolls<br/>= the difference is the arm"]
+```
+
+Even in live mode, where you supply every outcome, the engine decides what that outcome is worth: how far a success moves quality, how many subtasks it resolves, how much belief mass its evidence carries. All of that is drawn from the seed.
+
+Run the arms on different seeds and one may face a generous instance while the other faces a stingy one. You would have measured the dice. The seed is also the literal join key — `_paired_delta` matches runs by `r.seed`, so unpaired arms report `paired_seeds: 0` and no comparison is computed at all.
+
+One honest limit: because arms take different actions, they consume the generator at different rates and diverge in offset after the first branch. The seed fixes the starting instance and the distribution, not every individual draw.
+
+### Blind pairwise judging
+
+Absolute scores compress. A judge rating one answer at a time drifts to the top of its range, and two arms come back at 0.96 and 0.98 — noise between two scorings rather than a difference.
+
+So the quality question is settled by forced choice instead, the protocol MT-Bench and Chatbot Arena use: both final answers side by side, **labels stripped and order randomised**, pick one.
+
+```powershell
+$pw = @{ run_a=$controlId; run_b=$armId; winner='<a|b|tie>'
+         judge='copilot'; rubric='<the rubric, written before the runs>'
+         notes='<what decided it>' } | ConvertTo-Json
+Invoke-RestMethod "http://localhost:8000/api/experiments/worth-it/pairwise" `
+  -Method Post -Body $pw -ContentType 'application/json'
+```
+
+Win rates clear the same two-standard-error bar used everywhere else, which against a fair coin is `1/sqrt(n)`. That has a consequence worth knowing before spending anything:
+
+| Decisive comparisons | Win rate needed |
+| --- | --- |
+| 3 | above 1.08 — impossible |
+| 4 | above 1.00 — impossible |
+| 5 | above 0.947 — a clean sweep |
+| 9 | above 0.833 |
+
+**Below five paired seeds, significance is unreachable by construction.** Ties are recorded and counted, never dropped: two arms being indistinguishable is a real finding, and forcing a preference manufactures one that is not there.
+
+### Simulated and live results are never pooled
+
+Sampled outcomes and real agent work look identical downstream, so the comparison tracks mode per arm and refuses to mix them. A wholly simulated experiment is labelled as a check of the mechanism rather than evidence about agents; an experiment containing both modes is rejected outright, because pairing a sampled outcome against a real one on a shared seed compares nothing.
+
 ## Driving a live run from your agent
 
 The backend does not call a model — it is called *by* one. Anything that can make HTTP requests can drive it; [.github/copilot-instructions.md](.github/copilot-instructions.md) carries the protocol, which the GitHub Copilot CLI reads automatically.
@@ -274,7 +350,7 @@ backend/
   app/api/             REST + WebSocket routers
   app/services/        Run lifecycle, experiments, policy profiles, spectator hub
   tools/               balance.py (single-episode probe), campaign.py (cross-episode)
-  tests/               122 tests
+  tests/               131 tests
 frontend/
   app/                 Title screen, arena, compare, campaign, research library
   components/game/     Arena, HUD, Controls, GraphView, RewardDashboard, TraceExplorer
@@ -288,7 +364,7 @@ scripts/               dev.ps1, fetch-sprites.ps1
 
 ```powershell
 cd backend
-python -m pytest -q                                  # 122 tests
+python -m pytest -q                                  # 131 tests
 python -m tools.balance --episodes 40                # single-episode balance
 python -m tools.campaign --episodes 40               # cross-episode learning
 python -m tools.campaign --episodes 40 --shape-spread 0.4   # varied task instances
@@ -310,6 +386,8 @@ Every test here checks *mechanics* — that snapshots round-trip, that a stale p
 | `POST /api/runs/{id}/live/open` | Ask the policy who acts next; does not advance |
 | `POST /api/runs/{id}/live/report` | Fold in real agent output and advance |
 | `POST /api/runs/{id}/verdict` | Record judged answer quality |
+| `POST /api/experiments/{name}/pairwise` | Record a blind head-to-head preference |
+| `GET /api/meta/strategies/{id}/papers` | The published work a strategy implements |
 | `GET /api/experiments` | List experiments and their arms |
 | `GET /api/experiments/{name}` | Paired comparison, verdict and caveats |
 | `GET /api/profiles` | Learned parameters that outlive an episode |
