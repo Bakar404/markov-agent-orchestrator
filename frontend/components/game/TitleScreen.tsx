@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { PixelSprite } from "@/components/pixel/PixelSprite";
+import { api } from "@/lib/api";
 import { useGame } from "@/lib/store";
+import type { Paper } from "@/lib/types";
 
 const ROSTER = ["planner", "researcher", "critic", "verifier", "memory", "executor"];
 
@@ -32,10 +34,31 @@ export function TitleScreen() {
   const [budget, setBudget] = useState(1.2);
   const [seed, setSeed] = useState<string>("");
   const [experiment, setExperiment] = useState("");
+  const [papers, setPapers] = useState<Paper[]>([]);
+  const [papersNote, setPapersNote] = useState<string | null>(null);
 
   useEffect(() => {
     void loadMeta();
   }, [loadMeta]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPapers([]);
+    setPapersNote(null);
+    api
+      .strategyPapers(strategy, 3)
+      .then((result) => {
+        if (cancelled) return;
+        setPapers(result.papers);
+        setPapersNote(result.note);
+      })
+      .catch(() => {
+        if (!cancelled) setPapers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [strategy]);
 
   useEffect(() => {
     if (screen !== "attract") return;
@@ -242,6 +265,42 @@ copilot
           {!meta ? (
             <p className="font-mono text-xs text-edge">Loading strategies…</p>
           ) : null}
+        </div>
+
+        <div className="mt-3 border-l-2 border-violet bg-ink/60 px-3 py-2">
+          <p className="stat-label text-violet">
+            Implements — from the live library
+          </p>
+          {papersNote ? (
+            <p className="mt-1 font-mono text-3xs leading-relaxed text-amber">{papersNote}</p>
+          ) : papers.length === 0 ? (
+            <p className="mt-1 font-mono text-3xs text-edge">
+              No papers in the library for this category yet. Run Discover on the{" "}
+              <Link href="/research" className="text-phosphor underline">
+                Research
+              </Link>{" "}
+              page to fetch them.
+            </p>
+          ) : (
+            <ul className="mt-1 space-y-1">
+              {papers.map((paper) => (
+                <li key={paper.id} className="font-mono text-3xs leading-relaxed">
+                  <a
+                    href={paper.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-phosphor hover:underline"
+                  >
+                    {paper.title}
+                  </a>
+                  <span className="text-edge">
+                    {paper.year ? ` · ${paper.year}` : ""}
+                    {paper.citation_count ? ` · ${paper.citation_count} citations` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </section>
 
