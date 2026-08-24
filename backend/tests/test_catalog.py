@@ -205,3 +205,53 @@ def test_thin_evidence_is_flagged(client):
     make_arm(client, experiment="thin", strategy="control", seed=61)
     payload = client.get("/api/experiments/thin").json()
     assert any("Thin evidence" in c for c in payload["caveats"])
+
+
+def test_an_arm_that_never_escalated_is_not_a_comparison(client):
+    """It ran the same solo agent as the control, so any difference is noise."""
+    for strategy in ("control", "cascade"):
+        run = client.post(
+            "/api/runs",
+            json={
+                "task": "too short to ever stall",
+                "strategy": strategy,
+                "seed": 71,
+                "max_steps": 1,
+                "experiment": "inert",
+            },
+        ).json()
+        client.post(f"/api/runs/{run['id']}/step", json={"steps": 1})
+        client.post(f"/api/runs/{run['id']}/verdict", json={"score": 0.9})
+
+    payload = client.get("/api/experiments/inert").json()
+    arms = {a["arm"]: a for a in payload["arms"]}
+
+    assert arms["cascade"]["escalated"] == 0
+    assert "No verdict" in payload["verdict"]
+    assert "never escalated" in payload["verdict"]
+    assert any("NOT A COMPARISON" in c for c in payload["caveats"])
+
+
+def test_an_escalated_arm_still_gets_a_verdict(client):
+    """The guard must not suppress verdicts for arms that did diverge from the control."""
+    for strategy, score in (("control", 0.5), ("always_orchestrate", 0.9)):
+        for seed in (81, 82, 83):
+            run = client.post(
+                "/api/runs",
+                json={
+                    "task": "long enough to escalate",
+                    "strategy": strategy,
+                    "seed": seed,
+                    "max_steps": 8,
+                    "budget_usd": 2.0,
+                    "experiment": "diverged",
+                },
+            ).json()
+            client.post(f"/api/runs/{run['id']}/step", json={"steps": 8})
+            client.post(f"/api/runs/{run['id']}/verdict", json={"score": score})
+
+    payload = client.get("/api/experiments/diverged").json()
+    arms = {a["arm"]: a for a in payload["arms"]}
+
+    assert arms["always_orchestrate"]["escalated"] > 0
+    assert "never escalated" not in payload["verdict"]

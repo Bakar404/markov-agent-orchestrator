@@ -182,6 +182,20 @@ class ExperimentService:
 
         if control is None:
             return "No verdict: this experiment has no control arm to compare against."
+
+        # An arm that never escalated is the control wearing a different label.
+        inert = [
+            a["arm"]
+            for a in arms
+            if a["arm"] != CONTROL_ARM and a["escalated"] == 0 and a["runs"] > 0
+        ]
+        if inert and len(inert) == len(arms) - 1:
+            return (
+                f"No verdict: {', '.join(inert)} never escalated, so every arm ran the same solo "
+                "agent as the control. This is not a comparison — give the arms more steps, or "
+                "pick a strategy that escalates unconditionally."
+            )
+
         if len(judged) < 2:
             return (
                 "No verdict: quality has not been judged on enough arms. Cost is measured, but "
@@ -215,6 +229,21 @@ class ExperimentService:
                 "No arm is named 'control'. Without a single-agent baseline there is nothing to "
                 "attribute a difference to."
             )
+
+        # An arm that never escalated did the same thing the control did, so any difference
+        # between them is noise between two scorings of identical work.
+        inert = [
+            a["arm"]
+            for a in arms
+            if a["arm"] != CONTROL_ARM and a["escalated"] == 0 and a["runs"] > 0
+        ]
+        if inert:
+            notes.append(
+                f"NOT A COMPARISON: {', '.join(inert)} never escalated, so those arms ran the "
+                "same solo agent as the control. Give them more steps, or use a strategy that "
+                "escalates unconditionally, before reading anything into the difference."
+            )
+
         thin = [a["arm"] for a in arms if len(a["seeds"]) < 5]
         if thin:
             notes.append(
