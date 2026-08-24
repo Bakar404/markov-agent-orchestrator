@@ -255,3 +255,114 @@ def test_an_escalated_arm_still_gets_a_verdict(client):
 
     assert arms["always_orchestrate"]["escalated"] > 0
     assert "never escalated" not in payload["verdict"]
+
+
+# ------------------------------------------------------------------- pairwise
+
+
+def seed_pairwise_experiment(client, name: str, seeds=(91, 92, 93, 94, 95)) -> dict[str, list[str]]:
+    ids: dict[str, list[str]] = {"control": [], "always_orchestrate": []}
+    for strategy in ids:
+        for seed in seeds:
+            run = client.post(
+                "/api/runs",
+                json={
+                    "task": "compare approaches",
+                    "strategy": strategy,
+                    "seed": seed,
+                    "max_steps": 8,
+                    "budget_usd": 2.0,
+                    "experiment": name,
+                },
+            ).json()
+            client.post(f"/api/runs/{run['id']}/step", json={"steps": 8})
+            ids[strategy].append(run["id"])
+    return ids
+
+
+def test_pairwise_win_rate_drives_the_verdict(client):
+    ids = seed_pairwise_experiment(client, "pw-win")
+    for control_id, treat_id in zip(ids["control"], ids["always_orchestrate"], strict=True):
+        client.post(
+            "/api/experiments/pw-win/pairwise",
+            json={"run_a": control_id, "run_b": treat_id, "winner": "b", "judge": "blind"},
+        )
+
+    payload = client.get("/api/experiments/pw-win").json()
+    arms = {a["arm"]: a for a in payload["arms"]}
+
+    assert arms["always_orchestrate"]["pairwise"]["wins"] == 5
+    assert arms["always_orchestrate"]["pairwise"]["win_rate"] == 1.0
+    assert arms["always_orchestrate"]["pairwise"]["significant"] is True
+    assert arms["control"]["pairwise"]["losses"] == 5
+    assert "blind comparisons" in payload["verdict"]
+
+
+def test_a_split_decision_refuses_a_verdict(client):
+    """Three-two is what a fair coin does; the tool must not call that a win."""
+    ids = seed_pairwise_experiment(client, "pw-split")
+    winners = ["b", "b", "b", "a", "a"]
+    for control_id, treat_id, winner in zip(
+        ids["control"], ids["always_orchestrate"], winners, strict=True
+    ):
+        client.post(
+            "/api/experiments/pw-split/pairwise",
+            json={"run_a": control_id, "run_b": treat_id, "winner": winner},
+        )
+
+    payload = client.get("/api/experiments/pw-split").json()
+    assert "No verdict" in payload["verdict"]
+    assert "fair coin" in payload["verdict"]
+
+
+def test_the_control_can_win(client):
+    ids = seed_pairwise_experiment(client, "pw-control")
+    for control_id, treat_id in zip(ids["control"], ids["always_orchestrate"], strict=True):
+        client.post(
+            "/api/experiments/pw-control/pairwise",
+            json={"run_a": control_id, "run_b": treat_id, "winner": "a"},
+        )
+
+    payload = client.get("/api/experiments/pw-control").json()
+    assert "control won" in payload["verdict"]
+    assert "not paying for itself" in payload["verdict"]
+
+
+def test_ties_are_counted_not_dropped(client):
+    ids = seed_pairwise_experiment(client, "pw-tie", seeds=(96, 97))
+    for control_id, treat_id in zip(ids["control"], ids["always_orchestrate"], strict=True):
+        client.post(
+            "/api/experiments/pw-tie/pairwise",
+            json={"run_a": control_id, "run_b": treat_id, "winner": "tie"},
+        )
+
+    arms = {a["arm"]: a for a in client.get("/api/experiments/pw-tie").json()["arms"]}
+    assert arms["control"]["pairwise"]["ties"] == 2
+    assert arms["control"]["pairwise"]["decisive"] == 0
+    assert arms["control"]["pairwise"]["win_rate"] is None
+
+
+def test_missing_pairwise_data_is_flagged(client):
+    make_arm(client, experiment="pw-none", strategy="control", seed=98)
+    payload = client.get("/api/experiments/pw-none").json()
+    assert any("pairwise" in c for c in payload["caveats"])
+
+
+def test_pairwise_rejects_a_run_from_another_experiment(client):
+    ids = seed_pairwise_experiment(client, "pw-guard", seeds=(99,))
+    outsider = make_arm(client, experiment="elsewhere", strategy="control", seed=100)
+
+    response = client.post(
+        "/api/experiments/pw-guard/pairwise",
+        json={"run_a": ids["control"][0], "run_b": outsider, "winner": "a"},
+    )
+    assert response.status_code == 422
+
+
+def test_pairwise_rejects_comparing_a_run_with_itself(client):
+    ids = seed_pairwise_experiment(client, "pw-self", seeds=(110,))
+    response = client.post(
+        "/api/experiments/pw-self/pairwise",
+        json={"run_a": ids["control"][0], "run_b": ids["control"][0], "winner": "a"},
+    )
+    assert response.status_code == 422

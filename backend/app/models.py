@@ -270,6 +270,36 @@ class PolicyProfile(Base):
     )
 
 
+class PairwiseVerdict(Base):
+    """A blind preference between two arms on the same task.
+
+    Absolute scoring compresses: a judge rating one answer at a time drifts to the top of the
+    range, and the gap between arms disappears into rounding. A real experiment here produced
+    0.96 against 0.98, which is noise between two scorings rather than a difference.
+
+    Pairwise preference avoids that by never asking for an absolute number. The judge sees both
+    answers without knowing which arm produced them and picks one, which is the comparison
+    protocol used by MT-Bench and Chatbot Arena.
+    """
+
+    __tablename__ = "pairwise_verdicts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    experiment: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    run_a_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+    )
+    run_b_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+    )
+    winner: Mapped[str] = mapped_column(String(8), nullable=False)
+    """``a``, ``b`` or ``tie``. Ties are kept, not dropped: they are evidence of no difference."""
+    judge: Mapped[str] = mapped_column(String(64), nullable=False, default="human")
+    rubric: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class RunVerdict(Base):
     """An external judgment of how good a run's answer was.
 

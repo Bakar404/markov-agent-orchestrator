@@ -22,7 +22,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Run, RunVerdict
+from ..models import PairwiseVerdict, Run, RunVerdict
 
 CONTROL_ARM = "control"
 
@@ -70,6 +70,11 @@ class ExperimentService:
         ]
         control = by_arm.get(CONTROL_ARM)
 
+        arm_of_run = {r.id: self._arm_of(r) for r in runs}
+        pairwise = self._pairwise(experiment, arm_of_run)
+        for arm in arms:
+            arm["pairwise"] = pairwise.get(arm["arm"])
+
         for arm in arms:
             if control is None or arm["arm"] == CONTROL_ARM:
                 arm["vs_control"] = None
@@ -84,6 +89,51 @@ class ExperimentService:
             "verdict": self._headline(arms),
             "caveats": self._caveats(arms, control),
         }
+
+    def _pairwise(self, experiment: str, arm_of_run: dict[str, str]) -> dict[str, dict]:
+        """Win/loss/tie per arm from blind head-to-head comparisons."""
+        rows = self.session.scalars(
+            select(PairwiseVerdict).where(PairwiseVerdict.experiment == experiment)
+        ).all()
+        if not rows:
+            return {}
+
+        tally: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"wins": 0, "losses": 0, "ties": 0}
+        )
+        for row in rows:
+            arm_a = arm_of_run.get(row.run_a_id)
+            arm_b = arm_of_run.get(row.run_b_id)
+            if not arm_a or not arm_b or arm_a == arm_b:
+                continue
+            if row.winner == "tie":
+                tally[arm_a]["ties"] += 1
+                tally[arm_b]["ties"] += 1
+            elif row.winner == "a":
+                tally[arm_a]["wins"] += 1
+                tally[arm_b]["losses"] += 1
+            else:
+                tally[arm_b]["wins"] += 1
+                tally[arm_a]["losses"] += 1
+
+        out: dict[str, dict] = {}
+        for arm, counts in tally.items():
+            decisive = counts["wins"] + counts["losses"]
+            total = decisive + counts["ties"]
+            rate = counts["wins"] / decisive if decisive else None
+            # Against a fair coin the standard error of the win rate is 0.5/sqrt(n), so two of
+            # those is 1/sqrt(n) — the same two-standard-error bar used elsewhere here.
+            significant = bool(
+                decisive >= 2 and rate is not None and abs(rate - 0.5) > 1.0 / (decisive**0.5)
+            )
+            out[arm] = {
+                **counts,
+                "comparisons": total,
+                "decisive": decisive,
+                "win_rate": round(rate, 4) if rate is not None else None,
+                "significant": significant,
+            }
+        return out
 
     # ------------------------------------------------------------ internals
     def _tagged_runs(self) -> list[Run]:
@@ -196,6 +246,30 @@ class ExperimentService:
                 "pick a strategy that escalates unconditionally."
             )
 
+        # Pairwise preference discriminates where absolute scores compress, so it wins when present.
+        contested = [
+            a for a in arms if a["arm"] != CONTROL_ARM and (a.get("pairwise") or {}).get("decisive")
+        ]
+        if contested:
+            best = max(contested, key=lambda a: a["pairwise"]["win_rate"] or 0.0)
+            pw = best["pairwise"]
+            multiple = ((best["vs_control"] or {}).get("cost_usd") or {}).get("multiple")
+            cost_note = f" at {multiple}x the cost" if multiple else ""
+            if not pw["significant"]:
+                return (
+                    f"No verdict: '{best['arm']}' won {pw['wins']} of {pw['decisive']} blind "
+                    "comparisons, which a fair coin would produce often enough. Judge more pairs."
+                )
+            if pw["win_rate"] > 0.5:
+                return (
+                    f"'{best['arm']}' beat the control in {pw['wins']} of {pw['decisive']} blind "
+                    f"comparisons ({pw['win_rate']:.0%}){cost_note}."
+                )
+            return (
+                f"The control won: '{best['arm']}' took only {pw['wins']} of {pw['decisive']} "
+                "blind comparisons. Orchestration is not paying for itself here."
+            )
+
         if len(judged) < 2:
             return (
                 "No verdict: quality has not been judged on enough arms. Cost is measured, but "
@@ -256,6 +330,14 @@ class ExperimentService:
                 f"Unjudged arms: {', '.join(unjudged)}. Cost without quality cannot tell you "
                 "whether orchestration was worth it."
             )
+
+        if not any((a.get("pairwise") or {}).get("decisive") for a in arms):
+            notes.append(
+                "No blind pairwise comparisons recorded. Absolute scores compress — judges "
+                "rating one answer at a time drift to the top of the range — so prefer "
+                "POST /api/experiments/{name}/pairwise for the quality question."
+            )
+
         notes.append(
             "Internal reward is reported per arm but never compared: it pays for belief "
             "collapse, which a single-agent control does not attempt."

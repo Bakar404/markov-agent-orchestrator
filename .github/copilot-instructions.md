@@ -38,8 +38,22 @@ Tell the user, before spending anything:
 
 * the task, and 4 genuinely competing hypotheses (four rephrasings of one answer will collapse
   the belief trivially and produce a fake result)
-* the rubric you will score answers against
-* the arms, the seed, and the rough cost — each live step is a real model call
+* the rubric you will judge answers against, written now so it cannot be bent later
+* the arms, the seeds, and how many steps each gets
+
+**Use at least 5 seeds per arm.** One seed gives one comparison, and a single comparison cannot
+distinguish a real difference from a coin flip. If the user wants a quick look, say that a
+one-seed run is a smoke test rather than a result.
+
+**Give the arms enough steps to differ.** `cascade` only escalates once the solo attempt stalls,
+so a short run may never open the gate — and an arm that never escalates ran the same solo agent
+as the control. The comparison will refuse to give a verdict in that case, correctly. Eight steps
+is a reasonable floor; `always_orchestrate` escalates at step 2 regardless.
+
+Base the rubric on what the answer has to do. Microsoft Foundry's evaluators use a 1-5 Likert
+scale with 3 as the pass mark, and split writing quality into *coherence* (logical flow) and
+*fluency* (readability); borrow that split and add the dimensions the task actually needs, such
+as whether a stated constraint was satisfied or whether the steps are specific enough to follow.
 
 ### Step 1 — create both arms
 
@@ -90,14 +104,34 @@ $r = Invoke-RestMethod "$api/api/runs/$id/live/report" -Method Post -Body $rb -C
 
 Repeat until `done` is `True`, then move to the next arm.
 
-### Step 3 — score both arms against the rubric you wrote
+### Step 3 — judge the arms blind, pairwise
+
+Absolute scores compress. A judge rating one answer at a time drifts to the top of the range,
+and two arms come back 0.96 against 0.98 — noise between two scorings rather than a difference.
+A forced choice between two answers does not have that problem, which is why MT-Bench and
+Chatbot Arena compare rather than score.
+
+So: put the two final answers side by side **without their arm labels**, decide which is better
+against the rubric you wrote in step 0, and record it.
 
 ```powershell
-foreach ($arm in 'control','cascade') {
-    $v = @{ score=<0-1>; judge='copilot'; rubric='<the rubric from step 0>'
-            notes='<why this score>' } | ConvertTo-Json
-    Invoke-RestMethod "$api/api/runs/$($ids[$arm])/verdict" -Method Post -Body $v -ContentType 'application/json'
-}
+$pw = @{ run_a=$ids['control']; run_b=$ids['cascade']; winner='<a|b|tie>'
+         judge='copilot'; rubric='<the rubric from step 0>'
+         notes='<what decided it>' } | ConvertTo-Json
+Invoke-RestMethod "$api/api/experiments/$exp/pairwise" -Method Post -Body $pw -ContentType 'application/json'
+```
+
+Record `tie` honestly when neither is better. A tie is evidence the arms are indistinguishable,
+which is a real finding; forcing a preference manufactures a result that is not there.
+
+One comparison per seed. Five seeds gives five comparisons, which is the minimum for a win rate
+to clear two standard errors against a coin flip.
+
+Optionally also record an absolute score per run for the record:
+
+```powershell
+$v = @{ score=<0-1>; judge='copilot'; rubric='<rubric>'; notes='<why>' } | ConvertTo-Json
+Invoke-RestMethod "$api/api/runs/$($ids['control'])/verdict" -Method Post -Body $v -ContentType 'application/json'
 ```
 
 Score the *answers*, not the effort. An arm that spent more and arrived at the same place scores
