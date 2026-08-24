@@ -74,16 +74,44 @@ class PolicyProfileReset(BaseModel):
 
 
 class VerdictCreate(BaseModel):
-    """An external judgment of answer quality, which the reward function cannot supply."""
+    """An external judgment of answer quality, which the reward function cannot supply.
+
+    Absolute scores compress — judges rating one answer at a time drift to the top of the range.
+    Prefer ``POST /api/experiments/{name}/pairwise`` when comparing arms; use this for a
+    standalone quality record.
+    """
 
     score: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="0-1. Only comparable across arms if the same rubric was applied to each.",
+        description=(
+            "0-1. Microsoft Foundry's evaluators use a 1-5 Likert scale with a pass threshold "
+            "of 3; the equivalent here is 0.0/0.25/0.5/0.75/1.0 with 0.5 as the pass mark. "
+            "Only comparable across arms if the same rubric was applied to each."
+        ),
     )
     judge: str = Field("human", max_length=64, description="Who scored it.")
     rubric: str = Field("", max_length=2000, description="What was being scored, and how.")
+    notes: str = Field(
+        "", max_length=4000, description="Why this score. Foundry evaluators return a 'reason'."
+    )
+
+
+class PairwiseCreate(BaseModel):
+    """A blind preference between two runs, which discriminates where absolute scores do not."""
+
+    run_a: str = Field(..., max_length=32)
+    run_b: str = Field(..., max_length=32)
+    winner: Literal["a", "b", "tie"] = Field(
+        ...,
+        description=(
+            "Which answer was better. Record 'tie' honestly rather than forcing a preference — "
+            "ties are evidence that the arms are indistinguishable."
+        ),
+    )
+    judge: str = Field("human", max_length=64)
+    rubric: str = Field("", max_length=2000, description="Written before seeing the answers.")
     notes: str = Field("", max_length=4000)
 
 
