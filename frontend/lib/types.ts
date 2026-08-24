@@ -398,6 +398,14 @@ export interface PaperDetail extends Paper {
   cited_by: Paper[];
 }
 
+export interface StrategyPapers {
+  strategy: Strategy;
+  category: string;
+  paper_query: string;
+  papers: Paper[];
+  note: string | null;
+}
+
 export interface CitationGraphNode extends Paper {
   in_degree: number;
   out_degree: number;

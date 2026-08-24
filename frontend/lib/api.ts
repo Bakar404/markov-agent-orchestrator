@@ -16,6 +16,7 @@ import type {
   RunSummary,
   SearchResponse,
   StepResult,
+  StrategyPapers,
   Trace,
 } from "./types";
 
@@ -64,6 +65,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   meta: () => request<Meta>("/api/meta"),
+  strategyPapers: (id: string, limit = 3) =>
+    request<StrategyPapers>(
+      `/api/meta/strategies/${encodeURIComponent(id)}/papers?limit=${limit}`,
+    ),
 
   listRuns: (limit = 25) => request<RunSummary[]>(`/api/runs?limit=${limit}`),
   getRun: (id: string) => request<RunDetail>(`/api/runs/${id}`),
