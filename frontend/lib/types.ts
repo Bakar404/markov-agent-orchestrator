@@ -51,6 +51,7 @@ export interface Meta {
   agents: AgentSpec[];
   actions: ActionSpec[];
   policies: PolicySpec[];
+  strategies: Strategy[];
   taxonomy: TaxonomyCategory[];
   reward_weights: Record<string, number>;
   state_features: string[];
@@ -450,7 +451,9 @@ export interface SearchResponse {
 
 export interface CreateRunPayload {
   task: string;
-  policy: string;
+  /** Either a strategy id from the catalog, or a raw policy id. */
+  strategy?: string;
+  policy?: string;
   seed?: number | null;
   task_complexity?: number;
   budget_usd?: number;
@@ -461,6 +464,12 @@ export interface CreateRunPayload {
   confidence_target?: number;
   verification_target?: number;
   min_steps_before_terminate?: number;
+  experiment?: string;
+  arm?: string;
+  mode?: "sim" | "live";
+  hypotheses?: string[];
+  task_shape?: Record<string, number>;
+  policy_profile?: string;
 }
 
 export interface CampaignEpisode {

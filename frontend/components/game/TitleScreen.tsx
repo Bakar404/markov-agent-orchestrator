@@ -9,18 +9,17 @@ import { useGame } from "@/lib/store";
 const ROSTER = ["planner", "researcher", "critic", "verifier", "memory", "executor"];
 
 const SAMPLE_TASKS = [
-  "Survey reward shaping for cooperative agent orchestration",
-  "Design a routing policy that hits a quality bar under a fixed budget",
-  "Reproduce a value-decomposition result and verify the claims",
-  "Build a literature map of Markov games for multi-agent RL",
+  "Which caching strategy fits a read-heavy API with bursty traffic",
+  "Should we shard by tenant or by entity for a write-heavy multi-tenant store",
+  "Which exploration strategy suits a non-stationary orchestration MDP",
+  "Plan a migration from REST to gRPC for a service with 40 consumers",
 ];
 
-const STAGE_LABEL: Record<number, string> = {
-  0: "TUTORIAL",
-  1: "STAGE 1",
-  2: "STAGE 2",
-  3: "STAGE 3",
-  4: "STAGE 4",
+const ESCALATION_TONE: Record<string, string> = {
+  never: "text-amber",
+  always: "text-crimson",
+  heuristic: "text-cyan",
+  learned: "text-violet",
 };
 
 export function TitleScreen() {
@@ -28,10 +27,11 @@ export function TitleScreen() {
   const [screen, setScreen] = useState<"attract" | "setup">("attract");
 
   const [task, setTask] = useState(SAMPLE_TASKS[0]);
-  const [policy, setPolicy] = useState("markov_game");
+  const [strategy, setStrategy] = useState("cascade");
   const [complexity, setComplexity] = useState(0.55);
   const [budget, setBudget] = useState(1.2);
   const [seed, setSeed] = useState<string>("");
+  const [experiment, setExperiment] = useState("");
 
   useEffect(() => {
     void loadMeta();
@@ -84,17 +84,37 @@ export function TitleScreen() {
         <div className="panel max-w-2xl px-6 py-4 text-center">
           <p className="font-mono text-xs leading-relaxed text-[#a9a3e0]">
             One agent starts. Six more wait behind an escalation gate that costs budget to open.
-            Every action is sampled from a policy, every outcome from the environment. Spend
-            wisely, collapse the entropy, and find out whether orchestrating was worth it.
+            The question is whether opening it was worth it — so every strategy is measured
+            against a single agent doing the same task alone.
+          </p>
+        </div>
+
+        <div className="panel max-w-2xl px-6 py-4">
+          <p className="stat-label text-center">Run a real experiment</p>
+          <p className="mt-2 text-center font-mono text-3xs leading-relaxed text-[#8f89c9]">
+            Your agent does the work; the arena decides who acts and records what it cost.
+          </p>
+          <pre className="mt-3 overflow-x-auto border-2 border-edge bg-ink px-3 py-2 font-mono text-3xs text-phosphor">
+{`cd ${"C:\\src\\markov-agent-orchestrator"}
+copilot
+
+> compare orchestration against a single agent on: <your task>`}
+          </pre>
+          <p className="mt-2 text-center font-mono text-3xs text-edge">
+            Results land in{" "}
+            <Link href="/compare" className="text-cyan hover:text-phosphor">
+              /compare
+            </Link>
+            . Live steps cost real credits.
           </p>
         </div>
 
         <button
           type="button"
           onClick={() => setScreen("setup")}
-          className="animate-blink font-pixel text-sm text-amber sm:text-lg"
+          className="font-pixel text-3xs text-amber hover:text-phosphor sm:text-2xs"
         >
-          ▶ PRESS START
+          ▶ OR EXPLORE IN SIMULATION (FREE)
         </button>
 
         {offline ? (
@@ -106,11 +126,14 @@ export function TitleScreen() {
         )}
 
         <nav className="flex items-center gap-5">
+          <Link href="/compare" className="font-pixel text-3xs text-amber hover:text-phosphor">
+            COMPARE ▸
+          </Link>
           <Link href="/campaign" className="font-pixel text-3xs text-cyan hover:text-phosphor">
             LEARNING LAB ▸
           </Link>
           <Link href="/research" className="font-pixel text-3xs text-violet hover:text-phosphor">
-            RESEARCH ▸
+            STRATEGIES ▸
           </Link>
         </nav>
       </main>
@@ -120,7 +143,13 @@ export function TitleScreen() {
   return (
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col justify-center gap-6 px-6 py-12">
       <header className="flex items-baseline justify-between">
-        <h2 className="font-pixel text-lg text-phosphor">MISSION SETUP</h2>
+        <div>
+          <h2 className="font-pixel text-lg text-phosphor">SIMULATION SETUP</h2>
+          <p className="mt-1 font-mono text-3xs text-[#8f89c9]">
+            Outcomes are sampled, not real. Free and reproducible from the seed — use it to build
+            intuition, then confirm with a live run from the CLI.
+          </p>
+        </div>
         <button
           type="button"
           className="font-pixel text-3xs text-edge hover:text-phosphor"
@@ -174,15 +203,19 @@ export function TitleScreen() {
       </section>
 
       <section className="panel px-5 py-4">
-        <p className="stat-label">Orchestrator brain</p>
+        <p className="stat-label">Strategy</p>
+        <p className="mt-1 font-mono text-3xs text-[#8f89c9]">
+          Every run starts with one agent. The strategy decides whether it ever escalates into
+          orchestration — and that decision is what gets measured.
+        </p>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          {(meta?.policies ?? []).map((option) => {
-            const selected = option.id === policy;
+          {(meta?.strategies ?? []).map((option) => {
+            const selected = option.id === strategy;
             return (
               <button
                 key={option.id}
                 type="button"
-                onClick={() => setPolicy(option.id)}
+                onClick={() => setStrategy(option.id)}
                 className={`border-2 px-3 py-2 text-left transition-none ${
                   selected
                     ? "border-phosphor bg-phosphor/10 shadow-pixel-sm"
@@ -191,18 +224,23 @@ export function TitleScreen() {
               >
                 <span className="flex items-center justify-between gap-2">
                   <span className="font-pixel text-3xs text-phosphor">{option.label}</span>
-                  <span className="font-pixel text-3xs text-amber">
-                    {STAGE_LABEL[option.stage] ?? `S${option.stage}`}
+                  <span
+                    className={`font-pixel text-3xs ${ESCALATION_TONE[option.escalates] ?? "text-edge"}`}
+                  >
+                    {option.escalates.toUpperCase()}
                   </span>
                 </span>
                 <span className="mt-1 block font-mono text-3xs leading-relaxed text-[#8f89c9]">
-                  {option.description}
+                  {option.summary}
+                </span>
+                <span className="mt-1 block font-mono text-3xs leading-relaxed text-edge">
+                  {option.when}
                 </span>
               </button>
             );
           })}
           {!meta ? (
-            <p className="font-mono text-xs text-edge">Loading policies…</p>
+            <p className="font-mono text-xs text-edge">Loading strategies…</p>
           ) : null}
         </div>
       </section>
@@ -253,16 +291,41 @@ export function TitleScreen() {
         </div>
       </section>
 
+      <section className="panel px-5 py-4">
+        <label className="stat-label" htmlFor="experiment">
+          Experiment (optional)
+        </label>
+        <input
+          id="experiment"
+          value={experiment}
+          onChange={(event) => setExperiment(event.target.value)}
+          placeholder="worth-it"
+          className="mt-2 w-full border-2 border-edge bg-ink px-3 py-2 font-mono text-sm
+                     text-phosphor outline-none focus:border-phosphor"
+        />
+        <p className="mt-2 font-mono text-3xs leading-relaxed text-[#8f89c9]">
+          Name an experiment to compare strategies. Run the same task and the{" "}
+          <span className="text-amber">same seed</span> once per strategy, including{" "}
+          <span className="text-amber">Single Agent (control)</span> — differences are only paired
+          on seeds both arms ran. Results appear under{" "}
+          <Link href="/compare" className="text-cyan hover:text-phosphor">
+            /compare
+          </Link>
+          .
+        </p>
+      </section>
+
       <button
         type="button"
         disabled={booting || task.trim().length < 3}
         onClick={() =>
           void startGame({
             task: task.trim(),
-            policy,
+            strategy,
             seed: seed ? Number(seed) : null,
             task_complexity: complexity,
             budget_usd: budget,
+            ...(experiment.trim() ? { experiment: experiment.trim() } : {}),
           })
         }
         className="pixel-btn pixel-btn-primary py-4 text-sm"

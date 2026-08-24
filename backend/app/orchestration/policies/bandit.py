@@ -25,7 +25,7 @@ class LinUCBPolicy(Policy):
     stage = 1
     family = "bandit"
     description = (
-        "Disjoint LinUCB with one ridge model per action over the 12-dimensional state context. "
+        "Disjoint LinUCB with one ridge model per action over the 17-dimensional state context. "
         "Optimizes immediate reward only; no credit flows backwards through time."
     )
 
