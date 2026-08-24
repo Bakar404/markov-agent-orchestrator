@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+
+import { SiteNav } from "@/components/game/SiteNav";
 import {
   Bar,
   BarChart,
@@ -175,9 +177,7 @@ export default function CampaignPage() {
             difficulty as a confound.
           </p>
         </div>
-        <Link href="/" className="font-pixel text-3xs text-violet hover:text-phosphor">
-          ◂ ORCHESTRATOR
-        </Link>
+        <SiteNav />
       </header>
 
       <section className="panel space-y-3 px-4 py-3">

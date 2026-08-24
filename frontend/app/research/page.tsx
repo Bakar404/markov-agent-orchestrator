@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
+import { SiteNav } from "@/components/game/SiteNav";
 import type {
   Paper,
   PaperDetail,
@@ -118,12 +119,7 @@ export default function ResearchPage() {
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <Link href="/campaign" className="font-pixel text-3xs text-cyan hover:text-phosphor">
-            LEARNING ▸
-          </Link>
-          <Link href="/" className="font-pixel text-3xs text-violet hover:text-phosphor">
-            ◂ ORCHESTRATOR
-          </Link>
+          <SiteNav current="/research" />
         </div>
       </header>
 

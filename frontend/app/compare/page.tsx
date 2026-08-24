@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
+import { SiteNav } from "@/components/game/SiteNav";
 import type { ExperimentComparison, ExperimentSummary, PairedStat } from "@/lib/types";
 
 function Stat({ stat, precision = 1 }: { stat?: PairedStat | null; precision?: number }) {
@@ -72,12 +73,7 @@ export default function ComparePage() {
           </p>
         </div>
         <nav className="flex items-center gap-4">
-          <Link href="/" className="font-pixel text-3xs text-cyan hover:text-phosphor">
-            ◂ ARENA
-          </Link>
-          <Link href="/research" className="font-pixel text-3xs text-violet hover:text-phosphor">
-            STRATEGIES ▸
-          </Link>
+          <SiteNav current="/compare" />
         </nav>
       </header>
 
