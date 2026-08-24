@@ -54,11 +54,18 @@ class ExperimentService:
 
     # ----------------------------------------------------------- comparison
     def compare(self, experiment: str) -> dict:
-        runs = [
+        tagged = [
             run for run in self._tagged_runs() if run.config.get("experiment") == experiment
         ]
-        if not runs:
+        if not tagged:
             raise LookupError(f"No runs tagged with experiment '{experiment}'")
+
+        # A created-but-never-stepped run has no data. Averaging it in drags every mean
+        # toward zero and pairs a real run against an empty one on a shared seed.
+        runs = [run for run in tagged if run.step_count > 0]
+        unstarted = len(tagged) - len(runs)
+        if not runs:
+            raise LookupError(f"Experiment '{experiment}' has no runs that have stepped yet")
 
         verdicts = self._verdicts_for([r.id for r in runs])
         by_arm: dict[str, list[Run]] = defaultdict(list)
@@ -88,9 +95,10 @@ class ExperimentService:
             "control_arm": CONTROL_ARM if control else None,
             "modes": modes,
             "mode": modes[0] if len(modes) == 1 else "mixed",
+            "unstarted_runs": unstarted,
             "arms": arms,
             "verdict": self._headline(arms),
-            "caveats": self._caveats(arms, control, modes),
+            "caveats": self._caveats(arms, control, modes, unstarted),
         }
 
     def _pairwise(self, experiment: str, arm_of_run: dict[str, str]) -> dict[str, dict]:
@@ -278,6 +286,20 @@ class ExperimentService:
                 "blind comparisons. Orchestration is not paying for itself here."
             )
 
+        # Judged, but every comparison was a tie. That is a finding, not a missing verdict.
+        judged_pairs = [
+            a
+            for a in arms
+            if a["arm"] != CONTROL_ARM and (a.get("pairwise") or {}).get("comparisons")
+        ]
+        if judged_pairs:
+            total = sum(a["pairwise"]["comparisons"] for a in judged_pairs)
+            return (
+                f"No winner: all {total} blind comparison(s) were ties, so the arms are "
+                "indistinguishable on quality so far. Cost is still measured and may decide "
+                "it. Judge more seeds before concluding either way."
+            )
+
         if len(judged) < 2:
             return (
                 "No verdict: quality has not been judged on enough arms. Cost is measured, but "
@@ -304,8 +326,17 @@ class ExperimentService:
         )
 
     @staticmethod
-    def _caveats(arms: list[dict], control: list[Run] | None, modes: list[str]) -> list[str]:
+    def _caveats(
+        arms: list[dict], control: list[Run] | None, modes: list[str], unstarted: int = 0
+    ) -> list[str]:
         notes: list[str] = []
+
+        if unstarted:
+            notes.append(
+                f"{unstarted} run(s) in this experiment were created but never stepped, and "
+                "are excluded from every number here. Drive them or delete them; a half-run "
+                "experiment is not a smaller experiment, it is a differently-shaped one."
+            )
 
         # Sampled outcomes look identical to measured ones downstream, so say which this is.
         if modes == ["sim"]:
@@ -354,11 +385,19 @@ class ExperimentService:
                 "whether orchestration was worth it."
             )
 
-        if not any((a.get("pairwise") or {}).get("decisive") for a in arms):
+        recorded = sum((a.get("pairwise") or {}).get("comparisons") or 0 for a in arms)
+        decisive = sum((a.get("pairwise") or {}).get("decisive") or 0 for a in arms)
+        if not recorded:
             notes.append(
                 "No blind pairwise comparisons recorded. Absolute scores compress — judges "
                 "rating one answer at a time drift to the top of the range — so prefer "
                 "POST /api/experiments/{name}/pairwise for the quality question."
+            )
+        elif not decisive:
+            notes.append(
+                "Every blind comparison so far was a tie. That is a real finding — the arms "
+                "may be indistinguishable on this task — but it cannot produce a win rate. "
+                "Judge more seeds before concluding either way."
             )
 
         notes.append(
