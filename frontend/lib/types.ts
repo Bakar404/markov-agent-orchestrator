@@ -149,6 +149,7 @@ export interface ExperimentArm {
   policy: string;
   runs: number;
   seeds: number[];
+  modes: string[];
   goal_reached: number;
   escalated: number;
   mean_cost_usd: number;
@@ -166,6 +167,8 @@ export interface ExperimentComparison {
   experiment: string;
   tasks: string[];
   control_arm: string | null;
+  modes: string[];
+  mode: string;
   arms: ExperimentArm[];
   verdict: string;
   caveats: string[];

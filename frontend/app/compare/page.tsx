@@ -110,7 +110,24 @@ export default function ComparePage() {
       {comparison ? (
         <>
           <section className="panel px-4 py-3">
-            <p className="stat-label">Verdict</p>
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="stat-label">Verdict</p>
+              <span
+                className={`border-2 px-2 py-0.5 font-pixel text-3xs ${
+                  comparison.mode === "live"
+                    ? "border-lime text-lime"
+                    : comparison.mode === "mixed"
+                      ? "border-crimson text-crimson"
+                      : "border-amber text-amber"
+                }`}
+              >
+                {comparison.mode === "live"
+                  ? "LIVE AGENTS"
+                  : comparison.mode === "mixed"
+                    ? "MIXED MODES"
+                    : "SIMULATED"}
+              </span>
+            </div>
             <p className="mt-1 font-mono text-xs leading-relaxed text-phosphor">
               {comparison.verdict}
             </p>
