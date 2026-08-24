@@ -57,66 +57,26 @@ flowchart TD
     D --> E
 ```
 
-40 episodes, identical seeds and budget, `python -m tools.balance --episodes 40`:
+Whether that gate should open is an empirical question rather than a design decision, so the repository ships the tool that answers it instead of an answer that goes stale. [backend/tools/balance.py](backend/tools/balance.py) runs every policy over identical seeds and reports reward, win rate, step count and how each episode ended.
 
-| Policy | Reward | Win | Steps | How episodes ended |
-| --- | --- | --- | --- | --- |
-| `fixed_sequence` | **+4.09** | **20%** | 31.3 | budget 32, **goal 8** |
-| `contextual_bandit` | +2.57 | 0% | 14.3 | quit 40 |
-| `markov_game` | +1.20 | 0% | 18.9 | quit 40 |
-| `marl` | +1.16 | 0% | 19.5 | quit 40 |
-| `mdp` | +0.94 | 2% | 20.4 | quit 32, budget 7, goal 1 |
-| `random` | +0.78 | **5%** | 21.7 | quit 31, budget 7, goal 2 |
-| `heuristic` | −3.61 | 0% | 23.1 | quit 38 |
-| `single_agent` | −8.82 | 0% | 18.7 | budget 40 |
+```powershell
+python -m tools.balance --episodes 40
+```
 
-Two results worth reading twice.
+Read the termination column first. A policy that terminates voluntarily in most episodes is not routing badly — it is declining to route at all, which is a different failure with a different cause. Include `random` in any comparison you draw from it: a learned policy that cannot beat uniform selection has not learned anything worth carrying.
 
-**The hardcoded pipeline beats every learned policy.** No exceptions, on reward and on win rate.
-
-**`random` reaches the goal more often than any learned policy.** It wins 5% against 0%, 0%, 0% and 2%. A policy that picks uniformly is outperforming four that were trained.
-
-The cause is visible in the last two columns: the learned policies terminate voluntarily in all forty episodes, at a final confidence near 0.34 against a target of 0.55. They are not learning to route. They are learning to stop, because continuing is worth less than quitting given the agents they choose.
-
-That is the open problem this repository is currently pointed at. It is stated here rather than buried, because the harness is what found it.
-
-## The carried-learning result
+## Cross-episode learning
 
 A separate question: do the learned policies improve by carrying parameters between episodes? [backend/tools/campaign.py](backend/tools/campaign.py) runs each policy twice over identical task instances — once carrying learned parameters, once starting fresh — and reports the paired difference.
 
-| Policy | Stage | Δ carried − fresh | Reward trend across thirds |
-| --- | --- | --- | --- |
-| `contextual_bandit` | 1 | **−0.56 ± 0.24** ✱ | +2.00 → +2.49 → +2.59 |
-| `mdp` | 2 | **+1.47 ± 0.47** ✱ | +0.74 → +2.87 → +2.88 |
-| `markov_game` | 3 | **+0.82 ± 0.39** ✱ | −0.04 → +1.92 → +2.08 |
-| `marl` | 4 | **+1.05 ± 0.37** ✱ | +0.12 → +1.88 → +2.48 |
-| `random` | control | 0.00 ± 0.00 | flat |
+```powershell
+python -m tools.campaign --episodes 40
+python -m tools.campaign --episodes 40 --shape-spread 0.4
+```
 
-✱ exceeds two standard errors. 40 episodes per arm.
+`--shape-spread` varies how each episode is shaped — how much it depends on external evidence, on producing artifacts, on being verifiably correct — while keeping the carried and fresh arms on identical instances. That separates "carrying is harmful" from "these instances are simply harder", which are otherwise indistinguishable.
 
-Two things worth reading twice. The contextual bandit gets **significantly worse** when it carries learning — stage-1 myopia showing up as a measured regression rather than a footnote. And `random` returns *exactly* zero with zero variance, which is the control working: a policy with no state to carry must produce identical arms, and it does.
-
-### Why the bandit degrades
-
-The obvious explanation is that carried arm values stop matching the task instances in front of them. That explanation is wrong, and the harness can show it.
-
-`--shape-spread` varies how each episode is shaped — how much it depends on external evidence, on producing artifacts, on being verifiably correct — while keeping the carried and fresh arms on identical instances. If the problem were mismatched instances, making instances genuinely differ should hurt both arms alike.
-
-| Policy | spread 0.0 | spread 0.4 |
-| --- | --- | --- |
-| `contextual_bandit` | −0.56 ± 0.24 | **−1.20 ± 0.31** |
-| `mdp` | +1.47 ± 0.47 | +1.36 ± 0.47 |
-| `markov_game` | +0.82 ± 0.39 | **+1.20 ± 0.39** |
-| `marl` | +1.05 ± 0.37 | +1.08 ± 0.32 |
-| `random` | 0.00 ± 0.00 | 0.00 ± 0.00 |
-
-The bandit's regression more than doubles. The decisive detail is *which arm moves*: its fresh arm is flat (2.89 → 2.90) while its carried arm collapses (2.33 → 1.70). Varied instances do not make the problem harder — they make **carrying** harmful.
-
-The mechanism is exploration, not stale values. LinUCB's exploration bonus is `α·√(xᵀA⁻¹x)`, and `A` only ever accumulates, so carrying it shrinks exploration monotonically across episodes — precisely when heterogeneous tasks demand more of it. The fresh arm resets `A` every episode and keeps exploring.
-
-`markov_game` gains +0.38 from the same variation, so the task-shape context is genuinely informative. It is the bandit that cannot use it.
-
-**Consequence:** never give `contextual_bandit` a persistent policy profile.
+Always include `random` as the control. A policy with no state to carry must produce identical arms, so any non-zero difference on that row means the harness is leaking rather than the policy learning.
 
 ### Routing that persists
 
@@ -133,6 +93,9 @@ curl -X DELETE http://localhost:8000/api/profiles `
 ```
 
 Profiles are keyed by name **and** policy, and each records the context signature it was fitted for. LinUCB stores a `d×d` ridge matrix per action, so loading weights fitted against a different feature vector would corrupt the policy rather than merely stale it; a mismatch raises instead.
+
+> [!WARNING]
+> Carrying a bandit across episodes is not obviously safe. LinUCB's exploration bonus is `α·√(xᵀA⁻¹x)` and `A` only ever accumulates, so a carried profile shrinks its own exploration monotonically — precisely when heterogeneous tasks demand more of it. Measure with `tools.campaign` before giving any bandit a persistent profile.
 
 ## The policy stack
 
@@ -162,7 +125,7 @@ A **strategy** is a policy plus the configuration that makes it a coherent appro
 
 `GET /api/meta` returns the catalog; `POST /api/runs` accepts a `strategy` id and derives the policy, its options and the arm name.
 
-`GET /api/meta/strategies/{id}/papers` returns the papers a strategy implements, drawn from the live library and reordered by overlap with its paper query. It resolves well: `learned_bandit` to Li et al., `learned_marl` to the value-decomposition paper, `learned_markov_game` to Nash-Q and Shapley's *Stochastic Games*. The control returns nothing and says why — it was picking up an orchestration paper purely because it shares the routing tag, and citing that beside a single-agent baseline would be wrong.
+`GET /api/meta/strategies/{id}/papers` returns the papers a strategy implements, drawn from the live library and reordered by overlap with its paper query. The control returns nothing and says why — it was picking up an orchestration paper purely because it shares the routing tag, and citing that beside a single-agent baseline would be wrong.
 
 ## User workflow
 
@@ -286,7 +249,7 @@ One honest limit: because arms take different actions, they consume the generato
 
 ### Blind pairwise judging
 
-Absolute scores compress. A judge rating one answer at a time drifts to the top of its range, and two arms come back at 0.96 and 0.98 — noise between two scorings rather than a difference.
+Absolute scores compress. A judge rating one answer at a time drifts toward the top of its range, so two arms can land within a point or two of each other regardless of how they differ — noise between two scorings rather than a measurement.
 
 So the quality question is settled by forced choice instead, the protocol MT-Bench and Chatbot Arena use: both final answers side by side, **labels stripped and order randomised**, pick one.
 
@@ -370,11 +333,11 @@ python -m tools.campaign --episodes 40               # cross-episode learning
 python -m tools.campaign --episodes 40 --shape-spread 0.4   # varied task instances
 ```
 
-The balance harness exists because playing the game revealed what the tests could not: the win condition was originally unreachable in 100% of episodes. Agents emit correct evidence roughly 75% of the time, so `p(truth)` asymptotes near 0.65 and the original target of 0.88 was impossible by construction. That story is recorded in [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md).
+The balance harness exists because playing the game revealed what the tests could not: the win condition was originally unreachable by construction, in every episode, and nothing went red. That story is recorded in [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md).
 
 ### What the tests do not cover
 
-Every test here checks *mechanics* — that snapshots round-trip, that a stale profile is refused, that the comparison refuses to rank on reward. **None of them assert that a learned policy beats the hardcoded pipeline**, which is why a six-step loop out-scored stage-4 MARL without anything going red. If you want the central claim defended, it has to become a test.
+Every test here checks *mechanics* — that snapshots round-trip, that a stale profile is refused, that the comparison refuses to rank on reward. **None of them assert that a learned policy beats the hardcoded pipeline.** The central claim is therefore untested: routing could regress arbitrarily far without a single test failing. If you want that claim defended, it has to become a test.
 
 ## API surface
 
