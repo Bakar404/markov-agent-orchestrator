@@ -242,34 +242,6 @@ class ProviderQuery(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class PolicyProfile(Base):
-    """Learned policy parameters that outlive a single episode.
-
-    A run constructs a fresh policy by default, so nothing carries between tasks. A profile is
-    the router's memory: train it in simulation with tools/campaign.py, then load it to route
-    real work. ``signature`` pins the shapes the weights were fitted for, because LinUCB's ridge
-    matrices are feature_dim x feature_dim and silently loading a stale one would corrupt it.
-    """
-
-    __tablename__ = "policy_profiles"
-    __table_args__ = (UniqueConstraint("name", "policy", name="uq_profile_name_policy"),)
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    name: Mapped[str] = mapped_column(String(64), nullable=False)
-    policy: Mapped[str] = mapped_column(String(64), nullable=False)
-    signature: Mapped[str] = mapped_column(String(128), nullable=False)
-    state: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    episodes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total_steps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    cumulative_reward: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    mean_episode_reward: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
-    )
-
-
 class PairwiseVerdict(Base):
     """A blind preference between two arms on the same task.
 

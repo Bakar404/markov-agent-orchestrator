@@ -65,38 +65,6 @@ python -m tools.balance --episodes 40
 
 Read the termination column first. A policy that terminates voluntarily in most episodes is not routing badly — it is declining to route at all, which is a different failure with a different cause. Include `random` in any comparison you draw from it: a learned policy that cannot beat uniform selection has not learned anything worth carrying.
 
-## Cross-episode learning
-
-A separate question: do the learned policies improve by carrying parameters between episodes? [backend/tools/campaign.py](backend/tools/campaign.py) runs each policy twice over identical task instances — once carrying learned parameters, once starting fresh — and reports the paired difference.
-
-```powershell
-python -m tools.campaign --episodes 40
-python -m tools.campaign --episodes 40 --shape-spread 0.4
-```
-
-`--shape-spread` varies how each episode is shaped — how much it depends on external evidence, on producing artifacts, on being verifiably correct — while keeping the carried and fresh arms on identical instances. That separates "carrying is harmful" from "these instances are simply harder", which are otherwise indistinguishable.
-
-Always include `random` as the control. A policy with no state to carry must produce identical arms, so any non-zero difference on that row means the harness is leaking rather than the policy learning.
-
-### Routing that persists
-
-A run builds a fresh policy by default, so nothing learned survives the episode that taught it. A **policy profile** lifts those parameters out: train one in simulation, then load it to route real work.
-
-```powershell
-# train, then reuse under the name "router"
-curl -X POST http://localhost:8000/api/runs -H "Content-Type: application/json" `
-  -d '{"task":"...","policy":"marl","policy_profile":"router"}'
-
-curl http://localhost:8000/api/profiles          # inspect
-curl -X DELETE http://localhost:8000/api/profiles `
-  -H "Content-Type: application/json" -d '{"name":"router","policy":"marl"}'
-```
-
-Profiles are keyed by name **and** policy, and each records the context signature it was fitted for. LinUCB stores a `d×d` ridge matrix per action, so loading weights fitted against a different feature vector would corrupt the policy rather than merely stale it; a mismatch raises instead.
-
-> [!WARNING]
-> Carrying a bandit across episodes is not obviously safe. LinUCB's exploration bonus is `α·√(xᵀA⁻¹x)` and `A` only ever accumulates, so a carried profile shrinks its own exploration monotonically — precisely when heterogeneous tasks demand more of it. Measure with `tools.campaign` before giving any bandit a persistent profile.
-
 ## The policy stack
 
 | Stage | Policy | Mechanism | The limitation it exposes |
@@ -311,11 +279,11 @@ backend/
   app/orchestration/   State, actions, escalation, transitions, rewards, policies, strategies
   app/research/        Provider abstraction + arXiv / Semantic Scholar / PwC / HITS MCP
   app/api/             REST + WebSocket routers
-  app/services/        Run lifecycle, experiments, policy profiles, spectator hub
-  tools/               balance.py (single-episode probe), campaign.py (cross-episode)
-  tests/               131 tests
+  app/services/        Run lifecycle, experiments, spectator hub
+  tools/               balance.py (single-episode policy probe)
+  tests/               118 tests
 frontend/
-  app/                 Title screen, arena, compare, campaign, research library
+  app/                 Title screen, arena, compare, research library
   components/game/     Arena, HUD, Controls, GraphView, RewardDashboard, TraceExplorer
   components/pixel/    Sprite renderer with animation playback
 docs/                  Architecture, ResearchRoadmap, DesignDecisionLog
@@ -327,10 +295,8 @@ scripts/               dev.ps1, fetch-sprites.ps1
 
 ```powershell
 cd backend
-python -m pytest -q                                  # 131 tests
-python -m tools.balance --episodes 40                # single-episode balance
-python -m tools.campaign --episodes 40               # cross-episode learning
-python -m tools.campaign --episodes 40 --shape-spread 0.4   # varied task instances
+python -m pytest -q                                  # 118 tests
+python -m tools.balance --episodes 40                # policy behaviour across seeds
 ```
 
 The balance harness exists because playing the game revealed what the tests could not: the win condition was originally unreachable by construction, in every episode, and nothing went red. That story is recorded in [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md).
@@ -344,7 +310,7 @@ Every test here checks *mechanics* — that snapshots round-trip, that a stale p
 | Route | Purpose |
 | --- | --- |
 | `GET /api/meta` | Agents, actions, policies, **strategies**, taxonomy, reward weights |
-| `POST /api/runs` | Create a run; accepts `strategy`, `experiment`, `arm`, `task_shape`, `policy_profile` |
+| `POST /api/runs` | Create a run; accepts `strategy`, `experiment`, `arm`, `task_shape` |
 | `POST /api/runs/{id}/step` | Advance a simulated run |
 | `POST /api/runs/{id}/live/open` | Ask the policy who acts next; does not advance |
 | `POST /api/runs/{id}/live/report` | Fold in real agent output and advance |
@@ -353,7 +319,7 @@ Every test here checks *mechanics* — that snapshots round-trip, that a stale p
 | `GET /api/meta/strategies/{id}/papers` | The published work a strategy implements |
 | `GET /api/experiments` | List experiments and their arms |
 | `GET /api/experiments/{name}` | Paired comparison, verdict and caveats |
-| `GET /api/profiles` | Learned parameters that outlive an episode |
+
 | `WS /ws/runs/{id}` | Live step stream for spectators |
 
 ## Art

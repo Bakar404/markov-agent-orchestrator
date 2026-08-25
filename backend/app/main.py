@@ -9,10 +9,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import (
-    campaign_router,
     experiments_router,
     meta_router,
-    profiles_router,
     research_router,
     runs_router,
     ws_router,
@@ -62,8 +60,6 @@ def create_app() -> FastAPI:
     app.include_router(meta_router)
     app.include_router(runs_router)
     app.include_router(research_router)
-    app.include_router(campaign_router)
-    app.include_router(profiles_router)
     app.include_router(experiments_router)
     app.include_router(ws_router)
 
@@ -77,7 +73,13 @@ def create_app() -> FastAPI:
             "name": settings.app_name,
             "version": settings.version,
             "docs": "/docs",
-            "endpoints": ["/api/meta", "/api/runs", "/api/research", "/api/campaign", "/ws/runs/{run_id}"],
+            "endpoints": [
+                "/api/meta",
+                "/api/runs",
+                "/api/experiments",
+                "/api/research",
+                "/ws/runs/{run_id}",
+            ],
         }
 
     return app

@@ -4,8 +4,7 @@ Two rules drive the design.
 
 **Pair on seeds.** Arms that ran the same seed saw the same task instance, so the difference
 between them is exact rather than confounded by which tasks each happened to draw. Unpaired
-means across differently-seeded arms would mostly measure luck. This mirrors what
-``tools/campaign.py`` already does for carried-versus-fresh.
+means across differently-seeded arms would mostly measure luck.
 
 **Never rank on internal reward.** The reward function pays for belief collapse and subtask
 resolution, both of which presume decomposition, so a single-agent control scores badly on it

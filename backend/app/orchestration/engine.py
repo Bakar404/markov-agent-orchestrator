@@ -54,8 +54,6 @@ class RunConfig:
     task_shape: dict[str, float] = field(default_factory=dict)
     """needs_evidence / needs_execution / needs_verification, each 0-1. Lets one router
     specialize per task type instead of treating every task as identical at step 0."""
-    policy_profile: str | None = None
-    """Named learned parameters to load at start and update on termination."""
     experiment: str | None = None
     """Groups arms of the same A/B comparison."""
     arm: str | None = None
