@@ -21,7 +21,6 @@ from ..orchestration.engine import OrchestrationEngine, RunConfig, StepResult
 from ..orchestration.live import report_from_response
 from ..orchestration.strategies import get_strategy
 from ..schemas import RunCreate
-from .policy_profile_service import PolicyProfileService
 
 _engines: dict[str, OrchestrationEngine] = {}
 _locks: dict[str, asyncio.Lock] = {}
@@ -72,14 +71,11 @@ class RunService:
             mode=payload.mode,
             hypotheses=list(payload.hypotheses),
             task_shape=dict(payload.task_shape),
-            policy_profile=payload.policy_profile,
             experiment=payload.experiment,
             arm=arm,
             policy_options=policy_options,
         )
         engine = OrchestrationEngine(config)
-        if payload.policy_profile:
-            PolicyProfileService(self.session).apply_to(engine, payload.policy_profile)
         snapshot = engine.snapshot()
 
         run = Run(
@@ -276,12 +272,6 @@ class RunService:
         run.policy_state = snapshot
         run.status = "completed" if result.done else "running"
         self.session.commit()
-
-        if result.done and engine.config.policy_profile:
-            # One capture per episode, so profile.episodes counts episodes rather than steps.
-            PolicyProfileService(self.session).capture(
-                engine, engine.config.policy_profile, episode_reward=result.cumulative_reward
-            )
 
     # --------------------------------------------------------------- reset
     def reset(self, run_id: str, *, seed: int | None = None, keep_policy_learning: bool = False) -> dict:

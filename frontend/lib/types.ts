@@ -480,61 +480,6 @@ export interface CreateRunPayload {
   mode?: "sim" | "live";
   hypotheses?: string[];
   task_shape?: Record<string, number>;
-  policy_profile?: string;
-}
-
-export interface CampaignEpisode {
-  episode: number;
-  seed: number;
-  reward: number;
-  won: boolean;
-  steps: number;
-  confidence: number;
-  cost: number;
-  reason: string;
-}
-
-export interface CampaignArm {
-  mean_reward: number;
-  win_rate: number;
-  mean_steps: number;
-  mean_confidence: number;
-  episodes: CampaignEpisode[];
-}
-
-export interface CampaignPolicyResult {
-  policy: string;
-  label: string;
-  stage: number;
-  carried: CampaignArm;
-  fresh: CampaignArm;
-  delta: number;
-  stderr: number;
-  significant: boolean;
-  slope: number;
-  blocks: number[];
-}
-
-export interface CampaignResponse {
-  config: {
-    episodes: number;
-    seed_base: number;
-    max_steps: number;
-    budget_usd: number;
-    task_complexity: number;
-    policies: string[];
-  };
-  results: CampaignPolicyResult[];
-  interpretation: string;
-}
-
-export interface CampaignPayload {
-  policies?: string[];
-  episodes?: number;
-  seed_base?: number;
-  max_steps?: number;
-  budget_usd?: number;
-  task_complexity?: number;
 }
 
 export type SocketEvent =
