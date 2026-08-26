@@ -21,7 +21,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import PairwiseVerdict, Run, RunVerdict
+from ..models import Message, PairwiseVerdict, Run, RunVerdict
 
 CONTROL_ARM = "control"
 
@@ -158,6 +158,31 @@ class ExperimentService:
     def _mode_of(run: Run) -> str:
         return str((run.config or {}).get("mode") or "sim")
 
+    def _duplicate_runs(self, members: list[Run]) -> int:
+        """Runs whose reported work is byte-identical to another run in the same arm.
+
+        Independent seeds should produce independent answers. Identical ones mean the work was
+        done once and replayed, which inflates every count downstream: five comparisons of the
+        same pair is one comparison, not five.
+        """
+        if len(members) < 2:
+            return 0
+        run_ids = [r.id for r in members]
+        rows = self.session.scalars(
+            select(Message).where(Message.run_id.in_(run_ids), Message.kind != "handoff")
+        ).all()
+
+        joined: dict[str, list[str]] = defaultdict(list)
+        for row in sorted(rows, key=lambda m: (m.run_id, m.step)):
+            joined[row.run_id].append(row.content)
+
+        seen: dict[str, int] = defaultdict(int)
+        for run_id in run_ids:
+            body = "\n".join(joined.get(run_id, []))
+            if body:
+                seen[body] += 1
+        return sum(count - 1 for count in seen.values() if count > 1)
+
     def _verdicts_for(self, run_ids: list[str]) -> dict[str, float]:
         if not run_ids:
             return {}
@@ -187,6 +212,10 @@ class ExperimentService:
             "runs": len(members),
             "seeds": sorted({r.seed for r in members}),
             "modes": sorted({self._mode_of(r) for r in members}),
+            "unmetered_reports": sum(
+                int((r.current_state or {}).get("unmetered_reports") or 0) for r in members
+            ),
+            "duplicate_runs": self._duplicate_runs(members),
             "goal_reached": sum(1 for r in members if r.termination_reason == "goal_reached"),
             "escalated": sum(1 for r in members if (r.current_state or {}).get("has_escalated")),
             "mean_quality": statistics.mean(scored) if scored else None,
@@ -240,6 +269,20 @@ class ExperimentService:
         }
 
     @staticmethod
+    def _cost_is_derived(arm: dict) -> bool:
+        """Zero variance in the paired cost difference means cost was never measured.
+
+        Real per-call costs differ run to run. A stderr of exactly zero across several seeds
+        means every pair produced the identical figure, which happens when the numbers come from
+        the agent spec's base rates rather than from a model. This catches it after the fact,
+        without trusting the caller to admit it.
+        """
+        if arm.get("unmetered_reports"):
+            return True
+        cost = (arm.get("vs_control") or {}).get("cost_usd") or {}
+        return bool(cost.get("n", 0) >= 2 and cost.get("stderr") == 0 and cost.get("mean_delta"))
+
+    @staticmethod
     def _headline(arms: list[dict]) -> str:
         """One sentence a human can act on, or an honest refusal to give one."""
         judged = [a for a in arms if a["mean_quality"] is not None]
@@ -269,7 +312,10 @@ class ExperimentService:
             best = max(contested, key=lambda a: a["pairwise"]["win_rate"] or 0.0)
             pw = best["pairwise"]
             multiple = ((best["vs_control"] or {}).get("cost_usd") or {}).get("multiple")
-            cost_note = f" at {multiple}x the cost" if multiple else ""
+            # An unmetered arm's cost is the agent spec's base rate times the number of calls,
+            # which is arithmetic over the roster rather than anything the run measured.
+            metered = not ExperimentService._cost_is_derived(best)
+            cost_note = f" at {multiple}x the cost" if multiple and metered else ""
             if not pw["significant"]:
                 return (
                     f"No verdict: '{best['arm']}' won {pw['wins']} of {pw['decisive']} blind "
@@ -376,6 +422,25 @@ class ExperimentService:
             notes.append(
                 f"Thin evidence on {', '.join(thin)}: fewer than 5 seeds, so paired differences "
                 "are unlikely to clear two standard errors."
+            )
+
+        duplicated = [f"{a['arm']} ({a['duplicate_runs']})" for a in arms if a.get("duplicate_runs")]
+        if duplicated:
+            notes.append(
+                f"DUPLICATE WORK: {', '.join(duplicated)} contain runs whose reported output is "
+                "identical to another run in the same arm. Independent seeds should produce "
+                "independent answers; identical ones mean the work was done once and replayed, "
+                "so the comparison count is inflated and every derived rate with it."
+            )
+
+        unmetered = [a["arm"] for a in arms if ExperimentService._cost_is_derived(a)]
+        if unmetered:
+            notes.append(
+                f"COST NOT MEASURED on {', '.join(unmetered)}: the paired cost difference has "
+                "zero variance across seeds, which means the figures came from the agent spec's "
+                "base rates rather than from a model. The cost and token columns are then the "
+                "roster's rates times the number of calls — arithmetic you could do without "
+                "running anything. Supply cost_usd and tokens on every report."
             )
         unjudged = [a["arm"] for a in arms if a["mean_quality"] is None]
         if unjudged:

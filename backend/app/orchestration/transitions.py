@@ -43,6 +43,10 @@ class AgentReport:
     correct_evidence: bool
     summary: str
     source: str = "simulated"
+    metered: bool = False
+    """True only when the caller supplied both tokens and cost. A live report that omits them
+    gets the agent spec's base rates, which look identical downstream but are a lookup rather
+    than a measurement — and a cost comparison built on them is arithmetic, not evidence."""
     claimed_hypothesis: int | None = None
     """Live mode only. Which hypothesis the real response argued for; there is no hidden truth
     to grade against, so belief mass follows the claim and truth emerges from agreement."""
@@ -61,6 +65,7 @@ class AgentReport:
             "correct_evidence": self.correct_evidence,
             "summary": self.summary,
             "source": self.source,
+            "metered": self.metered,
             "claimed_hypothesis": self.claimed_hypothesis,
             "response_excerpt": self.response_excerpt,
         }
@@ -232,6 +237,8 @@ class TransitionModel:
             sum_latency += report.latency_ms
             max_latency = max(max_latency, report.latency_ms)
             total_tokens += report.tokens
+            if report.source == "live" and not report.metered:
+                next_state.unmetered_reports += 1
 
             belief = self._apply_evidence(belief, spec, report, next_state, rng)
 
