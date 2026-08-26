@@ -5,9 +5,7 @@ import Link from "next/link";
 
 import { PixelSprite } from "@/components/pixel/PixelSprite";
 import { SiteNav } from "@/components/game/SiteNav";
-import { api } from "@/lib/api";
 import { useGame } from "@/lib/store";
-import type { Paper } from "@/lib/types";
 
 const ROSTER = ["planner", "researcher", "critic", "verifier", "memory", "executor"];
 
