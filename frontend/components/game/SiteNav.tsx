@@ -5,10 +5,9 @@ import Link from "next/link";
 const LINKS = [
   { href: "/", label: "ARENA" },
   { href: "/compare", label: "COMPARE" },
-  { href: "/research", label: "PAPERS" },
 ] as const;
 
-/** One nav for every page, so the three demo beats are always one click apart. */
+/** One nav for the two questions a run answers. `/research` still resolves if typed. */
 export function SiteNav({ current }: { current?: string }) {
   return (
     <nav className="flex items-center gap-1">
