@@ -226,3 +226,15 @@ That gap is not an artifact to correct away. It is the transaction cost DDL-017 
 Two smaller consequences. `RunCreate` now bounds the budget by unit, because a ceiling of 100 is sane in dollars and instantly exhausted in tokens, which would have produced zero-step runs that look like results. And an arm covered by blind pairwise comparisons no longer earns the "unjudged" caveat, since pairwise is the method this repository prefers over absolute scoring.
 
 The cost is a second virtualenv. The `agent-framework` packages pin `fastapi` and `websockets` below what the backend runs on, so installing them together downgrades both and breaks the API. `bridge/requirements.txt` documents the separation rather than resolving it.
+
+## DDL-021: let an external orchestrator choose, and record that it was not the arena
+
+Follows DDL-020. Microsoft Agent Framework's sequential, concurrent and handoff patterns are worth comparing against the control, but they cannot be compared while the arena is overriding them. A policy that second-guesses the pattern measures the second-guessing.
+
+So there is now an `external` policy that records a decision instead of making one. `live/open` accepts `{"action": ..., "agents": [...]}` for runs using it, and refuses that payload for every other policy — otherwise any driver could steer any arm and still have the result labelled as a policy decision, which is the same failure DDL-015 was written about, arriving through a different door. Because nothing is sampled, `action_probability` is recorded as 1.0 rather than a fabricated distribution.
+
+Two properties keep this from becoming an escape hatch. A declaration drives exactly one step and is discarded afterwards, so a stale choice cannot decide a step it was not made for. And the declared action still has to be legal: the arena will not permit `escalate` until the generalist has attempted the work solo, so every workflow opens by working alone and pays the same entry cost as `always_orchestrate`. Deferring the choice is not exempting it. The workflows are handed the legal action list rather than trusted to know it, so a pattern cannot ask for something that would be refused.
+
+Two things the first live run of this exposed. The API's 90-second latency budget was sized for sampled timings, and a real call takes 10 to 25 seconds, so every run was ending on `latency_exhausted` after four steps rather than on its own terms; the bridge now sets it explicitly. And a fan-out step was invoking its agents one after another, which prices the concurrent pattern as a serial chain and discards the wall-clock saving that is the entire reason to use it — those calls now run together, which is also what the transition kernel already assumed when it modelled coalition latency as the slowest member plus coordination overhead.
+
+The cost is that `strategy` no longer implies the arena decided anything. `Strategy` gained an `external_driver` field naming the outside orchestrator so a reader comparing arms can see which ones the arena chose and which ones it only recorded, rather than having to infer it from the policy id.

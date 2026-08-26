@@ -192,6 +192,25 @@ class LiveAgentReport(BaseModel):
         return value
 
 
+class LiveOpenRequest(BaseModel):
+    """Who an external orchestrator chose to act next.
+
+    Only runs on the ``external`` policy accept this. Anywhere else the arena picks, and letting
+    the caller override that would turn a policy decision into a caller preference wearing its
+    label. The declared action still has to be legal, so an external workflow escalates before
+    reaching the specialists like every other arm.
+    """
+
+    action: str | None = Field(
+        None, max_length=32, description="Action id from /api/meta/actions."
+    )
+    agents: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Agent ids that will act. One for a solo action, several for run_parallel.",
+    )
+
+
 class LiveReportRequest(BaseModel):
     token: str = Field(..., description="Token returned by /live/open.")
     reports: list[LiveAgentReport] = Field(default_factory=list, max_length=8)

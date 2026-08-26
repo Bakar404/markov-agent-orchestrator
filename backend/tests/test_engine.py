@@ -5,7 +5,7 @@ import pytest
 
 from app.orchestration.actions import ACTIONS, Action
 from app.orchestration.engine import OrchestrationEngine, RunConfig
-from app.orchestration.policies import POLICY_REGISTRY
+from app.orchestration.policies import POLICY_REGISTRY, ExternalPolicy
 from app.orchestration.state import FEATURE_DIM
 from app.orchestration.transitions import TransitionModel
 
@@ -28,7 +28,9 @@ def run_to_completion(engine: OrchestrationEngine, cap: int = 200) -> list:
     return results
 
 
-@pytest.mark.parametrize("policy_id", sorted(POLICY_REGISTRY))
+@pytest.mark.parametrize(
+    "policy_id", sorted(set(POLICY_REGISTRY) - {ExternalPolicy.id})
+)
 def test_every_policy_completes_an_episode(policy_id: str):
     engine = build(policy_id)
     results = run_to_completion(engine)
@@ -39,6 +41,13 @@ def test_every_policy_completes_an_episode(policy_id: str):
         assert 0.0 <= result.action_probability <= 1.0
         assert result.action in {a.value for a in ACTIONS}
         assert result.state["step"] == result.step
+
+
+def test_the_external_policy_will_not_invent_a_choice():
+    """It exists to record a decision made elsewhere, so having none is an error, not a default."""
+    engine = build(ExternalPolicy.id)
+    with pytest.raises(ValueError, match="declare"):
+        engine.step()
 
 
 def test_same_seed_reproduces_the_trajectory():

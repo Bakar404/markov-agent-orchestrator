@@ -213,15 +213,21 @@ copilot
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {(meta?.strategies ?? []).map((option) => {
             const selected = option.id === strategy;
+            // These arms are driven from bridge/, which declares who acts. Creating one here
+            // would make a run this page could never open a step for.
+            const external = Boolean(option.external_driver);
             return (
               <button
                 key={option.id}
                 type="button"
+                disabled={external}
                 onClick={() => setStrategy(option.id)}
                 className={`border-2 px-3 py-2 text-left transition-none ${
-                  selected
-                    ? "border-phosphor bg-phosphor/10 shadow-pixel-sm"
-                    : "border-edge bg-ink hover:border-violet"
+                  external
+                    ? "cursor-not-allowed border-edge bg-ink/50 opacity-60"
+                    : selected
+                      ? "border-phosphor bg-phosphor/10 shadow-pixel-sm"
+                      : "border-edge bg-ink hover:border-violet"
                 }`}
               >
                 <span className="flex items-center justify-between gap-2">
@@ -235,7 +241,12 @@ copilot
                 <span className="mt-1 block font-mono text-3xs leading-relaxed text-[#8f89c9]">
                   {option.summary}
                 </span>
-                {selected ? (
+                {external ? (
+                  <span className="mt-1 block font-mono text-3xs leading-relaxed text-amber">
+                    Driven by {option.external_driver} — run it from bridge/run.py
+                  </span>
+                ) : null}
+                {selected && !external ? (
                   <span className="mt-1 block font-mono text-3xs leading-relaxed text-edge">
                     {option.when}
                   </span>

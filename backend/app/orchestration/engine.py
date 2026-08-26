@@ -22,7 +22,7 @@ from .actions import (
 )
 from .agents import AGENTS, SOLO_AGENT
 from .live import AgentBrief, PendingStep, build_brief, default_hypotheses
-from .policies import DEFAULT_POLICY, Policy, create_policy
+from .policies import DEFAULT_POLICY, ExternalPolicy, Policy, create_policy
 from .rewards import RewardModel
 from .state import FEATURE_DIM, OrchestratorState, initial_state
 from .transitions import AgentReport, TransitionModel, TransitionOutcome, agents_for_action
@@ -226,8 +226,26 @@ class OrchestrationEngine:
         return self._realize(decision, outcome)
 
     # ------------------------------------------------------------- live mode
-    def open_step(self, token: str) -> PendingStep:
+    def open_step(self, token: str, declared: tuple[str, list[str]] | None = None) -> PendingStep:
         """Let the policy choose, then stop. State does not advance until close_step."""
+        if declared is not None:
+            if not isinstance(self.policy, ExternalPolicy):
+                raise ValueError(
+                    f"This run is driven by the '{self.policy.id}' policy, which chooses for "
+                    "itself. Declaring the agents would let the caller pick the result."
+                )
+            action_id, agent_ids = declared
+            try:
+                action = Action(action_id)
+            except ValueError as exc:
+                raise ValueError(f"Unknown action '{action_id}'") from exc
+            self.policy.declare(action, agent_ids)
+        elif isinstance(self.policy, ExternalPolicy):
+            raise ValueError(
+                "This run is externally driven, so live/open needs {'action': ..., "
+                "'agents': [...]} describing who the external orchestrator chose."
+            )
+
         decision = self._decide()
         self._pending = (token, decision)
 
@@ -285,6 +303,8 @@ class OrchestrationEngine:
 
     def abandon_step(self) -> None:
         self._pending = None
+        if isinstance(self.policy, ExternalPolicy):
+            self.policy.consume()
 
     # --------------------------------------------------------------- phases
     def _decide(self) -> "_Decision":
@@ -307,6 +327,10 @@ class OrchestrationEngine:
             )
         else:
             agent_ids = [SINGLE_AGENT_ACTIONS[action]]
+
+        if isinstance(self.policy, ExternalPolicy):
+            # One declaration drives exactly one decision; the next step must declare again.
+            self.policy.consume()
 
         return _Decision(
             prev_state=prev_state,

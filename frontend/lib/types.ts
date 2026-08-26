@@ -123,6 +123,7 @@ export interface Strategy {
   paper_query: string;
   is_control: boolean;
   escalates: "never" | "always" | "heuristic" | "learned";
+  external_driver: string;
   policy_options: Record<string, unknown>;
 }
 

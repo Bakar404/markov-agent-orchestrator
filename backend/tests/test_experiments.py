@@ -325,6 +325,123 @@ def test_repeating_earlier_work_in_the_same_run_is_refused(client):
     assert "already recorded" in replayed.text
 
 
+# ------------------------------------------------- externally driven arms
+
+
+def _external_run(client, *, seed: int, experiment: str) -> str:
+    return client.post(
+        "/api/runs",
+        json={
+            "task": "who should act next",
+            "strategy": "maf_sequential",
+            "arm": "maf_sequential",
+            "seed": seed,
+            "experiment": experiment,
+            "mode": "live",
+            "max_steps": 8,
+            "budget_usd": 5.0,
+        },
+    ).json()["id"]
+
+
+def _declare(client, run_id: str, action: str, agents: list[str]):
+    return client.post(
+        f"/api/runs/{run_id}/live/open", json={"action": action, "agents": agents}
+    )
+
+
+def _report(client, run_id: str, opened: dict, note: str):
+    reports = [
+        {
+            "agent_id": agent_id,
+            "outcome": "success",
+            "confidence": 0.7,
+            "summary": f"{note} by {agent_id}",
+            "response": f"{note} by {agent_id}",
+            "tokens": 900,
+            "latency_ms": 50.0,
+            "cost_usd": 0.02,
+        }
+        for agent_id in opened["agents"]
+    ]
+    return client.post(
+        f"/api/runs/{run_id}/live/report",
+        json={"token": opened["token"], "reports": reports},
+    )
+
+
+def _walk_to_escalation(client, run_id: str) -> None:
+    """Do the solo work the arena requires before specialists become reachable."""
+    for attempt in range(6):
+        legal = client.get(f"/api/runs/{run_id}").json()["preview"]["legal_actions"]
+        if "escalate" in legal:
+            opened = _declare(client, run_id, "escalate", []).json()
+            _report(client, run_id, opened, "escalating")
+            return
+        opened = _declare(client, run_id, "invoke_generalist", ["generalist"]).json()
+        _report(client, run_id, opened, f"solo attempt {attempt}")
+    raise AssertionError("never reached escalation")
+
+
+def test_an_external_run_will_not_open_without_a_declaration(client):
+    """Nothing chose, so there is no step to hand back."""
+    run_id = _external_run(client, seed=701, experiment="external")
+    response = client.post(f"/api/runs/{run_id}/live/open")
+    assert response.status_code == 409, response.text
+    assert "externally driven" in response.text
+
+
+def test_an_external_run_takes_the_declared_agents(client):
+    run_id = _external_run(client, seed=702, experiment="external")
+    _walk_to_escalation(client, run_id)
+
+    opened = _declare(client, run_id, "run_parallel", ["researcher", "critic"])
+    assert opened.status_code == 200, opened.text
+    body = opened.json()
+    assert body["agents"] == ["researcher", "critic"]
+    # Nothing was sampled, so claiming a probability below 1 would be fiction.
+    assert body["action_probability"] == 1.0
+
+
+def test_an_external_run_still_obeys_the_escalation_gate(client):
+    """Deferring the choice is not the same as exempting it from the rules."""
+    run_id = _external_run(client, seed=703, experiment="external")
+    response = _declare(client, run_id, "invoke_researcher", ["researcher"])
+    assert response.status_code == 409, response.text
+    assert "not legal" in response.text
+
+
+def test_a_policy_driven_run_refuses_a_declaration(client):
+    """Otherwise any arm could be steered by its driver and still be labelled a policy."""
+    run_id = client.post(
+        "/api/runs",
+        json={
+            "task": "who chooses",
+            "strategy": "cascade",
+            "arm": "cascade",
+            "seed": 704,
+            "experiment": "external",
+            "mode": "live",
+            "max_steps": 4,
+        },
+    ).json()["id"]
+
+    response = _declare(client, run_id, "invoke_generalist", ["generalist"])
+    assert response.status_code == 409, response.text
+    assert "chooses for itself" in response.text
+
+
+def test_a_declaration_drives_exactly_one_step(client):
+    """A stale choice must not silently decide a later step it was not made for."""
+    run_id = _external_run(client, seed=705, experiment="external")
+    opened = _declare(client, run_id, "invoke_generalist", ["generalist"]).json()
+    assert _report(client, run_id, opened, "the first solo attempt").status_code == 200
+
+    response = client.post(f"/api/runs/{run_id}/live/open")
+    assert response.status_code == 409, response.text
+    assert "externally driven" in response.text
+
+
 def test_experiment_listing_counts_arms(client):
     make_run(client, arm="control", policy="single_agent", experiment="listing")
     make_run(client, arm="bandit", policy="contextual_bandit", experiment="listing")
