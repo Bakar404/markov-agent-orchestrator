@@ -149,8 +149,8 @@ def test_comparison_refuses_to_rank_on_internal_reward(client):
 # --------------------------------------------------- guards against bad input
 
 
-def drive_live(client, *, arm: str, seed: int, experiment: str, summary: str, metered: bool) -> str:
-    """Drive a two-step live run, reporting the same summary each step."""
+def drive_live(client, *, arm: str, seed: int, experiment: str, summary: str, metered: bool = True):
+    """Drive a two-step live run. Steps differ from each other; seeds repeat the same pair."""
     body = {
         "task": "does adding agents help",
         "strategy": arm,
@@ -163,7 +163,8 @@ def drive_live(client, *, arm: str, seed: int, experiment: str, summary: str, me
     }
     run_id = client.post("/api/runs", json=body).json()["id"]
 
-    for _ in range(2):
+    last = None
+    for step in range(2):
         opened = client.post(f"/api/runs/{run_id}/live/open").json()
         reports = []
         for agent_id in opened["agents"]:
@@ -171,31 +172,23 @@ def drive_live(client, *, arm: str, seed: int, experiment: str, summary: str, me
                 "agent_id": agent_id,
                 "outcome": "success",
                 "confidence": 0.7,
-                "summary": summary,
-                "response": summary,
+                "summary": f"{summary} [step {step}]",
+                "response": f"{summary} [step {step}]",
             }
             if metered:
-                report["tokens"] = 1000 + seed
-                report["cost_usd"] = 0.01 * seed
+                report.update({"tokens": 900 + step, "latency_ms": 500.0, "cost_usd": 0.02})
             reports.append(report)
-        client.post(
+        last = client.post(
             f"/api/runs/{run_id}/live/report",
             json={"token": opened["token"], "reports": reports},
         )
-    return run_id
+    return run_id, last
 
 
 def test_identical_reports_across_seeds_are_flagged(client):
-    """Replaying one answer across seeds is not five samples, and must not read as five."""
+    """Replaying one answer across seeds is not three samples, and must not read as three."""
     for seed in (101, 102, 103):
-        drive_live(
-            client,
-            arm="control",
-            seed=seed,
-            experiment="replayed",
-            summary="the same answer every time",
-            metered=True,
-        )
+        drive_live(client, arm="control", seed=seed, experiment="replayed", summary="same answer")
 
     payload = client.get("/api/experiments/replayed").json()
     arm = next(a for a in payload["arms"] if a["arm"] == "control")
@@ -212,7 +205,6 @@ def test_distinct_reports_are_not_flagged(client):
             seed=seed,
             experiment="distinct",
             summary=f"a genuinely different answer for {seed}",
-            metered=True,
         )
 
     payload = client.get("/api/experiments/distinct").json()
@@ -222,36 +214,89 @@ def test_distinct_reports_are_not_flagged(client):
     assert not any("DUPLICATE WORK" in c for c in payload["caveats"])
 
 
-def test_unmetered_reports_are_counted(client):
-    """Omitting tokens and cost falls back to the agent spec, which is a lookup not a measurement."""
-    run_id = drive_live(
-        client,
-        arm="control",
-        seed=301,
-        experiment="unmetered",
-        summary="no cost supplied",
-        metered=False,
+def test_live_report_requires_measured_cost_and_tokens(client):
+    """Omitted figures used to be invented from the agent spec. Now they are refused."""
+    _, response = drive_live(
+        client, arm="control", seed=301, experiment="unmetered", summary="no cost", metered=False
     )
+    assert response.status_code == 422, response.text
+    body = response.text.lower()
+    assert "tokens" in body and "cost_usd" in body
 
-    state = client.get(f"/api/runs/{run_id}").json()["state"]
-    assert state["unmetered_reports"] >= 1
 
-    arm = next(
-        a for a in client.get("/api/experiments/unmetered").json()["arms"] if a["arm"] == "control"
+def test_live_report_requires_a_non_empty_response(client):
+    run_id = client.post(
+        "/api/runs",
+        json={
+            "task": "empty response",
+            "strategy": "control",
+            "arm": "control",
+            "seed": 501,
+            "experiment": "blank",
+            "mode": "live",
+            "max_steps": 2,
+        },
+    ).json()["id"]
+    opened = client.post(f"/api/runs/{run_id}/live/open").json()
+
+    response = client.post(
+        f"/api/runs/{run_id}/live/report",
+        json={
+            "token": opened["token"],
+            "reports": [
+                {
+                    "agent_id": opened["agents"][0],
+                    "outcome": "success",
+                    "response": "   ",
+                    "tokens": 100,
+                    "latency_ms": 10.0,
+                    "cost_usd": 0.01,
+                }
+            ],
+        },
     )
-    assert arm["unmetered_reports"] >= 1
+    assert response.status_code == 422, response.text
 
 
-def test_metered_reports_are_not_counted(client):
-    run_id = drive_live(
-        client,
-        arm="control",
-        seed=401,
-        experiment="metered",
-        summary="cost supplied",
-        metered=True,
-    )
-    assert client.get(f"/api/runs/{run_id}").json()["state"]["unmetered_reports"] == 0
+def test_repeating_earlier_work_in_the_same_run_is_refused(client):
+    """A second step that resubmits the first step's output did no new work."""
+    run_id = client.post(
+        "/api/runs",
+        json={
+            "task": "replay within a run",
+            "strategy": "control",
+            "arm": "control",
+            "seed": 601,
+            "experiment": "intra-replay",
+            "mode": "live",
+            "max_steps": 3,
+        },
+    ).json()["id"]
+
+    def send(text: str):
+        opened = client.post(f"/api/runs/{run_id}/live/open").json()
+        return client.post(
+            f"/api/runs/{run_id}/live/report",
+            json={
+                "token": opened["token"],
+                "reports": [
+                    {
+                        "agent_id": opened["agents"][0],
+                        "outcome": "success",
+                        "summary": text,
+                        "response": text,
+                        "tokens": 500,
+                        "latency_ms": 10.0,
+                        "cost_usd": 0.01,
+                    }
+                ],
+            },
+        )
+
+    assert send("the first real finding").status_code == 200
+    replayed = send("the first real finding")
+    assert replayed.status_code == 422, replayed.text
+    assert "already recorded" in replayed.text
 
 
 def test_experiment_listing_counts_arms(client):

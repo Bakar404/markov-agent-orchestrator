@@ -186,6 +186,8 @@ class RunService:
         if unknown:
             raise ValueError(f"unknown agent id(s): {', '.join(unknown)}")
 
+        self._reject_replayed_responses(run, reports)
+
         built = [
             report_from_response(
                 AGENTS[item.agent_id],
@@ -202,6 +204,42 @@ class RunService:
 
     def live_abandon(self, run_id: str) -> None:
         self.engine_for(run_id).abandon_step()
+
+    def _reject_replayed_responses(self, run: Run, reports: list) -> None:
+        """Refuse work this run has already submitted.
+
+        Re-sending earlier output is not another step, and once persisted nothing downstream can
+        tell diligence from copy-paste. Only summaries are stored, so that is what is compared;
+        responses are checked within the batch, where both are in hand.
+        """
+        seen = set(
+            self.session.scalars(
+                select(Message.content).where(
+                    Message.run_id == run.id, Message.kind != "handoff"
+                )
+            ).all()
+        )
+
+        batch_responses: set[str] = set()
+        for item in reports:
+            body = (item.response or "").strip()
+            if body in batch_responses:
+                raise ValueError(
+                    f"agent '{item.agent_id}' submitted the same response as another agent in "
+                    "this step"
+                )
+            batch_responses.add(body)
+
+            # Mirrors how live.py derives a summary when the caller omits one.
+            summary = (item.summary or "").strip()
+            if not summary:
+                summary = body.splitlines()[0][:160] if body else ""
+            if summary and summary in seen:
+                raise ValueError(
+                    f"agent '{item.agent_id}' reported work this run already recorded "
+                    f"({summary[:60]!r}). Repeating earlier output is not another step."
+                )
+            seen.add(summary)
 
     def _persist_step(self, run: Run, engine: OrchestrationEngine, result: StepResult) -> None:
         snapshot = engine.snapshot()

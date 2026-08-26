@@ -96,7 +96,8 @@ whatever the brief asks. Then report it:
 ```powershell
 $reports = @($p.agents | ForEach-Object {
     @{ agent_id=$_; outcome='success'; confidence=0.8; claimed_hypothesis=0
-       response='<what you found>'; summary='<one line>' } })
+       response='<what you found>'; summary='<one line>'
+       tokens=<measured>; latency_ms=<measured>; cost_usd=<measured> } })
 $rb = @{ token=$p.token; reports=$reports } | ConvertTo-Json -Depth 6
 $r = Invoke-RestMethod "$api/api/runs/$id/live/report" -Method Post -Body $rb -ContentType 'application/json'
 "step=$($r.step.step) reward=$($r.step.reward) entropy=$($r.step.entropy_after) done=$($r.step.done)"
@@ -158,7 +159,16 @@ difference is not significant, say the arms were indistinguishable rather than p
 * `claimed_hypothesis` — the index your work actually supports. **Omit it if your work supported
   none of them.** There is no hidden ground truth in live mode, so belief mass follows claims and
   confidence only rises when independent agents agree. Guessing an index defeats the mechanism.
-* `cost_usd`, `latency_ms`, `tokens` — include when known; they are estimated otherwise.
+* `response` — required and non-empty. What you actually produced.
+* `cost_usd`, `latency_ms`, `tokens` — **required**. Report what the call actually spent. These
+  used to be optional and were filled in from the agent spec, which produced a cost column that
+  was arithmetic over the roster rather than a measurement. If you cannot measure them, you are
+  not running live — use sim mode, which is honest about being sampled.
+
+The API refuses a report that repeats work the run already recorded. That is not a bug to work
+around: if a step has nothing new, report `partial` or `failure` with what you actually tried.
+Never replay an earlier answer to fill a step, and never invent one to finish an arm faster — a
+short honest run is evidence, and a padded one is not.
 
 ### Strategies
 

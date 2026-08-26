@@ -167,6 +167,9 @@ Cost, latency and token counts stop being drawn and start being measured. Report
 There is no play button in live mode, and that is not a limitation. Pacing is the conversation, so every call is one you asked for.
 
 > [!IMPORTANT]
+> **Nothing is fabricated on your behalf.** A live report must carry a non-empty `response` and measured `tokens`, `latency_ms` and `cost_usd`; omitting them is refused rather than filled in from the agent spec. Resubmitting work the run already recorded is refused too. If you cannot measure a call, you are not running live — use sim mode, which is honest about being sampled.
+
+> [!IMPORTANT]
 > Live mode has no ground truth. Sim mode grades evidence against a hidden `latent_hypothesis`; a real task has no such label. Live reports carry a `claimed_hypothesis` instead, so belief mass follows what each agent argued for and **confidence only rises when independent agents agree**. An agent that confidently asserts nonsense will move the belief until the Verifier disputes it.
 
 The only other outbound calls belong to the research providers, and all of them fall back to a local corpus when offline.
