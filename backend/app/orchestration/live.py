@@ -170,9 +170,13 @@ def report_from_response(
         "failure": max(1.0 - prior, 1e-4) * 0.4,
     }[outcome]
 
-    tokens = int(max(payload.get("tokens") or spec.base_tokens, 1))
+    reported_tokens = payload.get("tokens")
+    reported_cost = payload.get("cost_usd")
+    metered = reported_tokens is not None and reported_cost is not None
+
+    tokens = int(max(reported_tokens or spec.base_tokens, 1))
     latency_ms = float(max(payload.get("latency_ms") or spec.base_latency_ms, 0.0))
-    cost_usd = payload.get("cost_usd")
+    cost_usd = reported_cost
     if cost_usd is None:
         # Derive from measured tokens at the agent's configured rate.
         cost_usd = spec.base_cost_usd * (tokens / max(spec.base_tokens, 1))
@@ -197,6 +201,7 @@ def report_from_response(
         correct_evidence=outcome != "failure" and confidence >= 0.5,
         summary=summary,
         source="live",
+        metered=metered,
         claimed_hypothesis=claimed_index,
         response_excerpt=response[:2000],
     )

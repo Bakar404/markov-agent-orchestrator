@@ -133,6 +133,9 @@ class OrchestratorState:
     """Once true, the specialist roster is unlocked. Never goes back to false."""
     solo_steps: int = 0
     stall_steps: int = 0
+    unmetered_reports: int = 0
+    """Live reports that arrived without both tokens and cost, and were filled in from the agent
+    spec. Not a feature; it exists so a cost comparison can refuse to speak when it is high."""
     """Consecutive steps that moved neither quality nor the belief. The escalation signal."""
 
     # ----------------------------------------------------------------- derived
@@ -264,6 +267,7 @@ class OrchestratorState:
             "solo_steps": self.solo_steps,
             "stall_steps": self.stall_steps,
             "stall": self.stall,
+            "unmetered_reports": self.unmetered_reports,
             "features": {
                 name: float(value) for name, value in zip(FEATURE_NAMES, self.features(), strict=True)
             },
@@ -300,6 +304,7 @@ class OrchestratorState:
             has_escalated=bool(payload.get("has_escalated", False)),
             solo_steps=int(payload.get("solo_steps", 0)),
             stall_steps=int(payload.get("stall_steps", 0)),
+            unmetered_reports=int(payload.get("unmetered_reports", 0)),
         )
 
 

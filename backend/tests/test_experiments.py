@@ -146,6 +146,114 @@ def test_comparison_refuses_to_rank_on_internal_reward(client):
             assert "internal_reward" not in " ".join(delta.keys())
 
 
+# --------------------------------------------------- guards against bad input
+
+
+def drive_live(client, *, arm: str, seed: int, experiment: str, summary: str, metered: bool) -> str:
+    """Drive a two-step live run, reporting the same summary each step."""
+    body = {
+        "task": "does adding agents help",
+        "strategy": arm,
+        "arm": arm,
+        "seed": seed,
+        "experiment": experiment,
+        "mode": "live",
+        "max_steps": 2,
+        "budget_usd": 5.0,
+    }
+    run_id = client.post("/api/runs", json=body).json()["id"]
+
+    for _ in range(2):
+        opened = client.post(f"/api/runs/{run_id}/live/open").json()
+        reports = []
+        for agent_id in opened["agents"]:
+            report = {
+                "agent_id": agent_id,
+                "outcome": "success",
+                "confidence": 0.7,
+                "summary": summary,
+                "response": summary,
+            }
+            if metered:
+                report["tokens"] = 1000 + seed
+                report["cost_usd"] = 0.01 * seed
+            reports.append(report)
+        client.post(
+            f"/api/runs/{run_id}/live/report",
+            json={"token": opened["token"], "reports": reports},
+        )
+    return run_id
+
+
+def test_identical_reports_across_seeds_are_flagged(client):
+    """Replaying one answer across seeds is not five samples, and must not read as five."""
+    for seed in (101, 102, 103):
+        drive_live(
+            client,
+            arm="control",
+            seed=seed,
+            experiment="replayed",
+            summary="the same answer every time",
+            metered=True,
+        )
+
+    payload = client.get("/api/experiments/replayed").json()
+    arm = next(a for a in payload["arms"] if a["arm"] == "control")
+
+    assert arm["duplicate_runs"] == 2, "three identical runs means two are copies"
+    assert any("DUPLICATE WORK" in c for c in payload["caveats"])
+
+
+def test_distinct_reports_are_not_flagged(client):
+    for seed in (201, 202, 203):
+        drive_live(
+            client,
+            arm="control",
+            seed=seed,
+            experiment="distinct",
+            summary=f"a genuinely different answer for {seed}",
+            metered=True,
+        )
+
+    payload = client.get("/api/experiments/distinct").json()
+    arm = next(a for a in payload["arms"] if a["arm"] == "control")
+
+    assert arm["duplicate_runs"] == 0
+    assert not any("DUPLICATE WORK" in c for c in payload["caveats"])
+
+
+def test_unmetered_reports_are_counted(client):
+    """Omitting tokens and cost falls back to the agent spec, which is a lookup not a measurement."""
+    run_id = drive_live(
+        client,
+        arm="control",
+        seed=301,
+        experiment="unmetered",
+        summary="no cost supplied",
+        metered=False,
+    )
+
+    state = client.get(f"/api/runs/{run_id}").json()["state"]
+    assert state["unmetered_reports"] >= 1
+
+    arm = next(
+        a for a in client.get("/api/experiments/unmetered").json()["arms"] if a["arm"] == "control"
+    )
+    assert arm["unmetered_reports"] >= 1
+
+
+def test_metered_reports_are_not_counted(client):
+    run_id = drive_live(
+        client,
+        arm="control",
+        seed=401,
+        experiment="metered",
+        summary="cost supplied",
+        metered=True,
+    )
+    assert client.get(f"/api/runs/{run_id}").json()["state"]["unmetered_reports"] == 0
+
+
 def test_experiment_listing_counts_arms(client):
     make_run(client, arm="control", policy="single_agent", experiment="listing")
     make_run(client, arm="bandit", policy="contextual_bandit", experiment="listing")
