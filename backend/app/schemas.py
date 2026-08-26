@@ -54,6 +54,16 @@ class RunCreate(BaseModel):
     experiment: str | None = Field(
         None, max_length=64, description="Groups arms of the same A/B comparison."
     )
+    default_model: str = Field(
+        "", max_length=64, description="Model every agent uses unless overridden."
+    )
+    agent_models: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Per-agent model override, e.g. {'generalist': 'opus', 'planner': 'mini'}. Lets an "
+            "arm buy an expensive orchestrator and cheap workers."
+        ),
+    )
     arm: str | None = Field(
         None, max_length=64, description="Which arm this run is, e.g. 'control' or 'marl'."
     )

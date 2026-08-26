@@ -30,6 +30,9 @@ param(
     [int]$MaxSteps = 5,
     [double]$BudgetUsd = 20.0,
     [string]$Api = 'http://localhost:8000',
+    [string]$OrchestratorModel = '',
+    [string]$WorkerModel = '',
+    [string]$JudgeModel = '',
     [switch]$AllowTools,
     [int]$JudgeExcerptChars = 6000
 )
@@ -47,10 +50,11 @@ function Invoke-Child {
         One fresh Copilot session. No memory of any other arm, which is what keeps the control
         a control. Returns the response plus what the call actually consumed.
     #>
-    param([Parameter(Mandatory)][string]$Prompt)
+    param([Parameter(Mandatory)][string]$Prompt, [string]$Model = '')
 
     $usageFile = Join-Path $env:TEMP "copilot-usage-$([guid]::NewGuid().ToString('N')).json"
     $cliArgs = @('-p', $Prompt, '-s', '--no-color', '--usage-output-file', $usageFile)
+    if ($Model) { $cliArgs += @('--model', $Model) }
     if ($AllowTools) { $cliArgs += @('--allow-tool', 'shell') }
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -77,18 +81,20 @@ function Invoke-Child {
 }
 
 function New-Run {
-    param([string]$Arm, [int]$Seed)
+    param([string]$Arm, [int]$Seed, [hashtable]$AgentModels, [string]$DefaultModel)
     $body = @{
-        task       = $Task
-        strategy   = $Arm
-        arm        = $Arm
-        seed       = $Seed
-        experiment = $Experiment
-        mode       = 'live'
-        belief_dim = $Hypotheses.Count
-        hypotheses = $Hypotheses
-        max_steps  = $MaxSteps
-        budget_usd = $BudgetUsd
+        task          = $Task
+        strategy      = $Arm
+        arm           = $Arm
+        seed          = $Seed
+        experiment    = $Experiment
+        mode          = 'live'
+        belief_dim    = $Hypotheses.Count
+        hypotheses    = $Hypotheses
+        max_steps     = $MaxSteps
+        budget_usd    = $BudgetUsd
+        default_model = $DefaultModel
+        agent_models  = $AgentModels
     } | ConvertTo-Json -Depth 5
     (Invoke-RestMethod "$Api/api/runs" -Method Post -Body $body -ContentType 'application/json').id
 }
@@ -147,7 +153,7 @@ function Invoke-Arm {
 
         $reports = @()
         foreach ($brief in $opened.briefs) {
-            $result = Invoke-Child -Prompt (Build-Prompt -Brief $brief -Arm $Arm -Step $run.step_count)
+            $result = Invoke-Child -Prompt (Build-Prompt -Brief $brief -Arm $Arm -Step $run.step_count) -Model $brief.model
             $body = ($result.Response -replace '(?im)^HYPOTHESIS:.*$', '').Trim()
 
             # An empty child response is a failed step, not a step to skip or to fill in.
@@ -183,8 +189,9 @@ function Invoke-Arm {
         }
 
         $s = $stepped.step
-        Write-Host ("    step {0}: {1} -> {2}  ({3} tok, {4:N2} AIU)" -f `
-            $s.step, ($opened.agents -join '+'), $s.outcome, ($reports | Measure-Object tokens -Sum).Sum, ($reports | Measure-Object cost_usd -Sum).Sum)
+        Write-Host ("    step {0}: {1} -> {2}  ({3} tok, {4:N2} AIU{5})" -f `
+            $s.step, ($opened.agents -join '+'), $s.outcome, ($reports | Measure-Object tokens -Sum).Sum, ($reports | Measure-Object cost_usd -Sum).Sum, `
+            $(if ($opened.briefs[0].model) { ", $($opened.briefs[0].model)" } else { '' }))
         if ($s.done) { break }
     }
 }
@@ -236,7 +243,7 @@ VERDICT: A
 REASON: <one sentence>
 "@
 
-    $judged = Invoke-Child -Prompt $prompt
+    $judged = Invoke-Child -Prompt $prompt -Model $JudgeModel
     $m = [regex]::Match($judged.Response, '(?im)^VERDICT:\s*(A|B|TIE)\s*$')
     if (-not $m.Success) {
         Write-Host "  seed ${Seed}: judge gave no parseable verdict; not recorded" -ForegroundColor Red
@@ -278,9 +285,20 @@ if (-not $AllowTools) { Write-Host "children run without tools; a researcher bri
 
 $runs = @{}
 foreach ($seed in $Seeds) {
+    # The control buys one capable generalist. The treatment buys an orchestrator of the same
+    # grade plus cheaper specialists, against the same budget, so the comparison is how to spend
+    # rather than how much.
+    $workers = @{}
+    if ($WorkerModel) {
+        foreach ($id in 'planner', 'researcher', 'critic', 'verifier', 'memory', 'executor') {
+            $workers[$id] = $WorkerModel
+        }
+    }
+    if ($OrchestratorModel) { $workers['generalist'] = $OrchestratorModel }
+
     $runs[$seed] = @{
-        Control   = New-Run -Arm $ControlArm -Seed $seed
-        Treatment = New-Run -Arm $TreatmentArm -Seed $seed
+        Control   = New-Run -Arm $ControlArm -Seed $seed -AgentModels @{} -DefaultModel $OrchestratorModel
+        Treatment = New-Run -Arm $TreatmentArm -Seed $seed -AgentModels $workers -DefaultModel $OrchestratorModel
     }
 }
 

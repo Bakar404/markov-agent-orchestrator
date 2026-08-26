@@ -54,6 +54,12 @@ class RunConfig:
     task_shape: dict[str, float] = field(default_factory=dict)
     """needs_evidence / needs_execution / needs_verification, each 0-1. Lets one router
     specialize per task type instead of treating every task as identical at step 0."""
+    default_model: str = ""
+    """Model every agent uses unless overridden. Empty means the caller decides."""
+    agent_models: dict[str, str] = field(default_factory=dict)
+    """Per-agent model override, e.g. an expensive generalist over cheap specialists. Held
+    against the same budget as the control, this is a make-or-buy comparison rather than a
+    test of whether more money buys more."""
     experiment: str | None = None
     """Groups arms of the same A/B comparison."""
     arm: str | None = None
@@ -221,7 +227,13 @@ class OrchestrationEngine:
 
         hypotheses = self.hypotheses
         briefs = [
-            build_brief(AGENTS[agent_id], decision.prev_state, self.config.task, hypotheses)
+            build_brief(
+                AGENTS[agent_id],
+                decision.prev_state,
+                self.config.task,
+                hypotheses,
+                model=self.config.agent_models.get(agent_id, self.config.default_model),
+            )
             for agent_id in decision.agent_ids
         ]
         return PendingStep(

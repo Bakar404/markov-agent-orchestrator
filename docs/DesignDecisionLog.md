@@ -130,3 +130,65 @@ A Critic that surfaces an unconsidered failure mode legitimately reopens hypothe
 The Critic carries the highest noise strength in the agent registry, so negative information gain appears regularly, and the interface displays it as a negative number against the entropy endpoints that produced it.
 
 The consequence is that a step can be worth taking while scoring negatively on the information gain term, which is the correct incentive and occasionally a surprising one.
+
+## DDL-014: narrow to the experiment harness, and archive the rest to a tag
+
+Four products had accumulated in one repository: the comparison harness, a cross-episode learning lab, policy profiles that outlive an episode, and a Copilot CLI extension. Three of them diluted the claim the repository makes.
+
+Removed at `9f37f1c`, recoverable with `git checkout pre-narrowing`:
+
+| Archived | Footprint | Why |
+| --- | --- | --- |
+| Cross-episode learning lab | `api/campaign.py`, `services/campaign_service.py`, `tools/campaign.py`, `frontend/app/campaign/` | A second product with its own page, CLI tool and result format. It answers whether carrying parameters between episodes helps, which is a different question from whether orchestration helps |
+| Policy profiles | `api/profiles.py`, `services/policy_profile_service.py`, `models.PolicyProfile`, `test_profiles.py` | Only meaningful for carrying learning between episodes, which is the campaign story |
+| Copilot CLI extension | `.github/extensions/markov-arena/` | Never functional on the shipped CLI version; extension discovery does not work there |
+
+`RunConfig.from_dict` filters unknown keys, so runs recorded with a `policy_profile` still restore. Nothing in the archived set is referenced by what remains.
+
+The cost is that the carried-versus-fresh finding — that a contextual bandit gets measurably worse when it carries learning, because LinUCB's ridge matrix only accumulates and its exploration shrinks monotonically — now lives only in git history. The mechanism is preserved as a warning beside the policy stack; the measurement is not.
+
+## DDL-015: refuse fabricated reports rather than filling them in
+
+Supersedes the second half of DDL-005, which said cost and token figures are sampled. In live mode they are now measured or the report is refused.
+
+A live experiment was driven end to end and produced a significant result — one arm winning five of five blind comparisons. It was void. The control arm had submitted the same placeholder text on four of five seeds, and cost had come from the agent spec's base rates rather than from a model, so the cost delta was arithmetic over the roster. Every existing guard passed. The fabrication was only found by hashing message content by hand.
+
+The engine was the larger offender. A report that omitted `tokens` and `cost_usd` silently received `spec.base_tokens` and `spec.base_cost_usd`, which is the engine inventing the number that became the headline.
+
+Live reports now require a non-empty `response` and measured `tokens`, `latency_ms` and `cost_usd`. A run refuses a summary it has already recorded, and two agents submitting identical text within one step is refused. If a call cannot be measured it is not live, and sim mode remains honest about being sampled.
+
+Two detectors cover history and anything that slips past. Reports are hashed per arm and identical runs counted, because replaying one answer across seeds is one comparison rather than five. And cost is treated as unmeasured when the paired difference has zero variance across seeds — real per-call costs differ, so a stderr of exactly zero means the figures were looked up. That second check works on runs recorded before it existed and does not depend on the caller admitting anything.
+
+The cost is a stricter contract that will reject drivers written against the old one, which is intended.
+
+## DDL-016: separate the driver, the arms, and the judge into different sessions
+
+Driving an experiment by hand puts one agent into three conflicting roles: it produces the control answer, produces the orchestrated answer, and then judges its own output. Those separations were being held up by good intentions, and DDL-015 records what happened when they were not.
+
+`scripts/run-experiment.ps1` spawns a fresh session per brief, so no arm inherits another's context, and a third session judges with the labels stripped and the presentation order shuffled per seed. Which position the control occupied is recorded in the verdict notes, so any judgment can be re-checked. Control runs first across every seed.
+
+The driver never reasons about the task. A driver that contributes content is an unmeasured third arm.
+
+Two consequences worth stating. Cost is reported in AIU because that is the unit the CLI bills; no dollar rate is exposed and inventing one would defeat the purpose of measuring. And because every child is a fresh session, each pays roughly twenty-three thousand tokens of cached context, so per-call totals barely vary and the cost axis currently counts sessions rather than work.
+
+## DDL-017: reject Markov games as the framing, and treat the comparison as a make-or-buy decision
+
+Shapley's stochastic games require simultaneous moves and per-player rewards that differ. The specialists here move when instructed and share the orchestrator's objective, so two of the three defining features are absent. The framing was aspirational.
+
+What the experiment actually compares is whether to do work with one capable generalist or to delegate it to cheaper specialists and pay the coordination overhead. That is a make-or-buy decision, and the literature that fits it is transaction cost economics: the escalation gate is the boundary of the firm, and orchestration is worth buying exactly when coordination costs less than the capability it purchases.
+
+Two adjacent frames stay useful and are kept. The orchestrator cannot observe whether a cheap worker did the work or produced something shaped like work, which is a principal-agent problem with hidden information — and it is why reports carry a claimed hypothesis and a calibrated confidence rather than a bare answer. And choosing which worker to invoke remains a contextual bandit problem, which is implemented.
+
+The cost is that the repository's name no longer describes it, and that the learned Markov game policy is now presented as one arm among several rather than as the thesis.
+
+## DDL-018: assign models per agent, and hold both arms to the same budget
+
+Follows DDL-017. If a make-or-buy comparison is the framing, the arms have to differ in how they spend rather than in how much.
+
+The comparison this repository ran until now was one agent against several agents on the same model, which conflates two variables and leaves the cost axis nearly meaningless — DDL-016 records that per-call totals barely varied because fixed session context dominated them. Buying a capable orchestrator and cheap specialists changes that: different models have genuinely different rates, so the cost column becomes a bill rather than a count of spawns.
+
+`RunConfig` carries `default_model` and a per-agent `agent_models` override, and the brief returned by `live/open` names the model that should answer it. The driver spawns each child on the model its brief specifies. Nothing in the engine knows what a model costs; that arrives through the measured report, which DDL-015 now requires.
+
+The budget constraint is not new code. Both arms already take `budget_usd`, so a matched-budget experiment is a matter of setting it equally and letting the arms exhaust it differently. What matters is that the framing is stated: an arm that outspends the control has not demonstrated anything except that more money buys more.
+
+The cost is a real failure mode that did not exist before. An orchestrator delegating to cheap workers can spend its budget on coordination and receive confident, wrong answers it cannot verify — which is the principal-agent problem from DDL-017 arriving as a measurable outcome rather than as theory. That is the result worth finding either way.
