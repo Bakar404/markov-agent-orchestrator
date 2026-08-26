@@ -115,7 +115,8 @@ if (command === "compare") {
           `${(a.arm === "control" ? c.cyan : c.magenta)(a.arm.padEnd(20))} ` +
           c.dim(
             `runs ${a.runs}  esc ${a.escalated}/${a.runs}  ` +
-              `${Math.round(a.mean_tokens).toLocaleString()} tok  ${a.mean_cost_usd.toFixed(2)} AIU`,
+              `${Math.round(a.mean_tokens).toLocaleString()} tok  ` +
+              `${a.mean_cost_usd.toFixed(2)} ${cmp.cost_unit}`,
           ),
       ),
     ]),

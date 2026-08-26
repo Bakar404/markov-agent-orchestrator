@@ -56,6 +56,12 @@ class RunConfig:
     specialize per task type instead of treating every task as identical at step 0."""
     default_model: str = ""
     """Model every agent uses unless overridden. Empty means the caller decides."""
+    cost_unit: str = "usd"
+    """What the cost figures are denominated in — usd, tokens, aiu.
+
+    Not every driver can observe dollars. A framework may report only tokens, and a CLI may
+    report a provider's own billing unit. Recording which one was used lets the comparison
+    label the column truthfully and refuse to pool arms measured in different units."""
     agent_models: dict[str, str] = field(default_factory=dict)
     """Per-agent model override, e.g. an expensive generalist over cheap specialists. Held
     against the same budget as the control, this is a make-or-buy comparison rather than a

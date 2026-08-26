@@ -57,6 +57,14 @@ class RunCreate(BaseModel):
     default_model: str = Field(
         "", max_length=64, description="Model every agent uses unless overridden."
     )
+    cost_unit: Literal["usd", "tokens", "aiu"] = Field(
+        "usd",
+        description=(
+            "What cost figures are denominated in. Report what you can actually observe: a "
+            "framework that exposes only token counts should say 'tokens' rather than pass "
+            "them off as dollars. Must be identical across every arm of an experiment."
+        ),
+    )
     agent_models: dict[str, str] = Field(
         default_factory=dict,
         description=(

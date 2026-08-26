@@ -238,6 +238,7 @@ export async function run(opts) {
     max_steps: opts.maxSteps,
     budget_usd: opts.budget,
     default_model: opts.orchestratorModel,
+    cost_unit: "aiu",
   };
 
   const runs = {};
@@ -291,7 +292,8 @@ export async function run(opts) {
       `${(a.arm === "control" ? c.cyan : c.magenta)(a.arm.padEnd(20))} ` +
       c.dim(
         `runs ${a.runs}  esc ${a.escalated}/${a.runs}  ` +
-          `${Math.round(a.mean_tokens).toLocaleString()} tok  ${a.mean_cost_usd.toFixed(2)} AIU`,
+          `${Math.round(a.mean_tokens).toLocaleString()} tok  ` +
+          `${a.mean_cost_usd.toFixed(2)} ${cmp.cost_unit}`,
       ),
     ),
   ], { color: c.phosphor }));

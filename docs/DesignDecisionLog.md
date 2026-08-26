@@ -192,3 +192,15 @@ The comparison this repository ran until now was one agent against several agent
 The budget constraint is not new code. Both arms already take `budget_usd`, so a matched-budget experiment is a matter of setting it equally and letting the arms exhaust it differently. What matters is that the framing is stated: an arm that outspends the control has not demonstrated anything except that more money buys more.
 
 The cost is a real failure mode that did not exist before. An orchestrator delegating to cheap workers can spend its budget on coordination and receive confident, wrong answers it cannot verify — which is the principal-agent problem from DDL-017 arriving as a measurable outcome rather than as theory. That is the result worth finding either way.
+
+## DDL-019: record what cost is measured in rather than assuming dollars
+
+Follows DDL-015 and DDL-018. Requiring a measured cost is only half the discipline; a measured number in an unstated unit is still a claim rather than an observation.
+
+Every cost path in this repository was named `cost_usd` and every display prefixed it with a dollar sign, but almost nothing that drives the arena can actually observe dollars. The Copilot CLI reports AIU and premium-request counts. Microsoft Agent Framework surfaces token counts through `usage_details` and nothing else. A driver that has tokens and prints them under a `$` has not measured dollars — it has relabelled a number, which is the same class of error as the fabricated reports DDL-015 rejects, just quieter.
+
+So `RunConfig` gains `cost_unit`, constrained to `usd`, `tokens`, or `aiu` and fixed when the run is created. The comparison reports the unit alongside the figures, the frontend uses it as the column label instead of hardcoding `$`, and the CLI prints the recorded unit rather than the one it happened to be written against. Arms measured in different units earn a `MIXED COST UNITS` caveat, on the same reasoning as mixed sim and live modes: subtracting tokens from AIU produces a number that looks like a result and is not one.
+
+The field defaults to `usd` so existing runs keep their meaning, and `RunConfig.from_dict` already ignores unknown keys, so no stored run needs migrating.
+
+The cost is that the underlying field is still called `cost_usd` while now sometimes holding tokens, which is a name that lies about its contents. Renaming it touches the database, the API surface, the frontend types, and the CLI at once; the unit is recorded next to it instead, and the rename is deferred rather than pretended away.

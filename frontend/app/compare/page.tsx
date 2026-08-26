@@ -144,7 +144,7 @@ export default function ComparePage() {
                     "arm",
                     "seeds",
                     "quality",
-                    "cost",
+                    `cost (${comparison.cost_unit})`,
                     "tokens",
                     "steps",
                     "esc",
@@ -180,7 +180,13 @@ export default function ComparePage() {
                           arm.mean_quality.toFixed(2)
                         )}
                       </td>
-                      <td className="px-2 py-1 text-violet">${arm.mean_cost_usd.toFixed(4)}</td>
+                      <td className="px-2 py-1 text-violet">
+                        {comparison.cost_unit === "usd"
+                          ? `$${arm.mean_cost_usd.toFixed(4)}`
+                          : arm.mean_cost_usd.toLocaleString(undefined, {
+                              maximumFractionDigits: 2,
+                            })}
+                      </td>
                       <td className="px-2 py-1 text-edge">
                         {Math.round(arm.mean_tokens).toLocaleString()}
                       </td>
