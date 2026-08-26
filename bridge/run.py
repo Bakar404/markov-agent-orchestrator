@@ -32,27 +32,33 @@ for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+def say(line: str = "") -> None:
+    # Redirected output is block-buffered, and an experiment runs for many minutes; without
+    # flushing, the log stays empty until the very end.
+    print(line, flush=True)
+
+
 def log(kind: str, payload: dict) -> None:
     head = f"[{payload.get('arm', '-'):>10} s{payload.get('seed', '-')}]"
     if kind == "run_created":
-        print(f"{head} run {payload['run_id']}  watch {payload['watch']}")
+        say(f"{head} run {payload['run_id']}  watch {payload['watch']}")
     elif kind == "step_open":
-        print(f"{head} step {payload['step']} {payload['action']} -> {', '.join(payload['agents'])}")
+        say(f"{head} step {payload['step']} {payload['action']} -> {', '.join(payload['agents'])}")
     elif kind == "agent_done":
         flag = "" if payload["parsed"] else "  [no verdict block]"
-        print(
+        say(
             f"{head}   {payload['agent']:<12} {payload['model']:<18} "
             f"{payload['outcome']:<8} conf {payload['confidence']:.2f}  "
             f"new {payload['new_tokens']:>6} / cached {payload['cached_tokens']:>6}"
             f"{flag}"
         )
     elif kind == "step_done":
-        print(
+        say(
             f"{head} reward {payload['reward']:+.3f}  entropy {payload['entropy']:.3f}"
             f"{'  DONE' if payload['done'] else ''}"
         )
     elif kind == "open_refused":
-        print(f"{head} {payload['detail']}")
+        say(f"{head} {payload['detail']}")
 
 
 async def main() -> int:
@@ -63,9 +69,29 @@ async def main() -> int:
     parser.add_argument("--hypothesis", action="append", dest="hypotheses", required=True)
     parser.add_argument("--rubric-file", type=Path, required=True)
     parser.add_argument("--seeds", nargs="+", type=int, default=[101, 102, 103, 104, 105])
-    parser.add_argument("--arm", action="append", dest="arms", default=None)
+    parser.add_argument(
+        "--arm",
+        action="append",
+        dest="arms",
+        default=None,
+        help=(
+            "Repeatable. 'control' is mandatory. The arena's own arms are cascade and "
+            "always_orchestrate; maf_sequential, maf_concurrent and maf_handoff are driven by "
+            "Microsoft Agent Framework patterns instead. Defaults to control and cascade."
+        ),
+    )
     parser.add_argument("--max-steps", type=int, default=8)
     parser.add_argument("--budget", type=float, default=250_000.0, help="in tokens")
+    parser.add_argument(
+        "--latency-budget-ms",
+        type=float,
+        default=1_800_000.0,
+        help=(
+            "Matched across arms. The API default of 90s was sized for sampled timings and a "
+            "real call takes 10-25s, so leaving it would end every run on latency_exhausted "
+            "after four steps rather than on its own terms."
+        ),
+    )
     parser.add_argument("--orchestrator-model", default="claude-opus-5")
     parser.add_argument("--worker-model", default="claude-haiku-4.5")
     parser.add_argument("--judge-model", default="gpt-5.4")
@@ -73,10 +99,10 @@ async def main() -> int:
 
     arms = args.arms or [CONTROL, "cascade"]
     if CONTROL not in arms:
-        print(f"error: every experiment needs the '{CONTROL}' arm, or it is not a comparison.")
+        say(f"error: every experiment needs the '{CONTROL}' arm, or it is not a comparison.")
         return 2
     if len(args.hypotheses) < 3:
-        print(
+        say(
             "error: at least three competing hypotheses. Four is better — four rephrasings of "
             "one answer collapse the belief trivially and produce a result that is not real."
         )
@@ -86,11 +112,12 @@ async def main() -> int:
             f"warning: {len(args.seeds)} seed(s) is a smoke test, not a result. "
             "A win rate needs |p-0.5| > 1/sqrt(n), which 5 seeds can only just reach.",
             file=sys.stderr,
+            flush=True,
         )
 
     rubric = args.rubric_file.read_text(encoding="utf-8").strip()
     if not rubric:
-        print("error: the rubric is empty. Write it before running, not after seeing results.")
+        say("error: the rubric is empty. Write it before running, not after seeing results.")
         return 2
 
     # Workers stay cheap so the arms differ in how they spend rather than in how much.
@@ -106,8 +133,8 @@ async def main() -> int:
             # Control first, so a solo answer is never contaminated by having already seen
             # the specialists do the work.
             for arm in sorted(arms, key=lambda a: a != CONTROL):
-                print(f"\n=== {arm}  seed {seed} ===")
-                results[seed][arm] = await drive_arm(
+                say(f"\n=== {arm}  seed {seed} ===")
+                result = await drive_arm(
                     arena,
                     arm=arm,
                     strategy=arm,
@@ -117,12 +144,18 @@ async def main() -> int:
                     hypotheses=args.hypotheses,
                     max_steps=args.max_steps,
                     budget=args.budget,
+                    latency_budget_ms=args.latency_budget_ms,
                     default_model=args.orchestrator_model,
                     agent_models=agent_models,
                     on_event=log,
                 )
+                results[seed][arm] = result
+                say(
+                    f"    {result.steps} steps, driven by {result.driver}, "
+                    f"{result.new_tokens:,} fresh tokens, ended on {result.terminated_reason}"
+                )
 
-        print("\n=== blind pairwise judging ===")
+        say("\n=== blind pairwise judging ===")
         judge = Judge(args.judge_model)
         challengers = [a for a in arms if a != CONTROL]
         for seed, by_arm in results.items():
@@ -130,7 +163,7 @@ async def main() -> int:
             for arm in challengers:
                 other = by_arm[arm]
                 if not control.final_answer and not other.final_answer:
-                    print(f"  seed {seed} {arm}: both arms produced nothing, skipping")
+                    say(f"  seed {seed} {arm}: both arms produced nothing, skipping")
                     continue
                 judgement = await judge.compare(
                     task=args.task,
@@ -150,20 +183,20 @@ async def main() -> int:
                 )
                 shown = {"a": CONTROL, "b": arm}[judgement.presented_first]
                 named = {"a": CONTROL, "b": arm, "tie": "tie"}[judgement.winner]
-                print(f"  seed {seed}  {CONTROL} vs {arm} -> {named}  (shown first: {shown})")
+                say(f"  seed {seed}  {CONTROL} vs {arm} -> {named}  (shown first: {shown})")
 
-        print("\n=== comparison ===")
+        say("\n=== comparison ===")
         try:
             comparison = arena.comparison(args.experiment)
         except ArenaError as exc:
-            print(f"  {exc}")
+            say(f"  {exc}")
             return 1
 
-        print(f"  {comparison['verdict']}")
+        say(f"  {comparison['verdict']}")
         unit = comparison["cost_unit"]
         for arm in comparison["arms"]:
             quality = arm["mean_quality"]
-            print(
+            say(
                 f"  {arm['arm']:<20} runs {arm['runs']}  "
                 f"esc {arm['escalated']}/{arm['runs']}  "
                 f"quality {'unjudged' if quality is None else f'{quality:.2f}'}  "
@@ -171,7 +204,7 @@ async def main() -> int:
                 f"tokens {arm['mean_tokens']:,.0f}"
             )
         for caveat in comparison["caveats"]:
-            print(f"  ! {caveat}")
+            say(f"  ! {caveat}")
 
     return 0
 

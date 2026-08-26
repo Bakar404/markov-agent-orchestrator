@@ -51,6 +51,12 @@ Report it honestly, because these numbers drive the belief update rather than de
   index defeats that.
 """
 
+HANDOFF_CONTRACT = """
+Also add a `next_agent` field naming who should act next, chosen from: planner, researcher,
+critic, verifier, memory, executor. Pick the one whose skill the work actually needs now, not
+the one that sounds thorough. Naming yourself is ignored.
+"""
+
 
 @dataclass
 class Invocation:
@@ -73,6 +79,8 @@ class Invocation:
     model: str
     parsed: bool
     """False when the agent did not return the json block, which is reported rather than hidden."""
+    next_agent: str = ""
+    """Who this agent nominated to act next. Only asked for by the handoff workflow."""
 
 
 @dataclass
@@ -103,10 +111,10 @@ class AgentPool:
         self._agents[agent_id] = entry
         return entry
 
-    async def invoke(self, brief: dict) -> Invocation:
+    async def invoke(self, brief: dict, *, ask_for_handoff: bool = False) -> Invocation:
         agent, session, model = self._agent_for(brief)
         started = time.perf_counter()
-        response = await agent.run(_prompt_for(brief), session=session)
+        response = await agent.run(_prompt_for(brief, ask_for_handoff), session=session)
         latency_ms = (time.perf_counter() - started) * 1000.0
 
         usage = dict(response.usage_details or {})
@@ -132,6 +140,7 @@ class AgentPool:
             latency_ms=latency_ms,
             model=model,
             parsed=parsed,
+            next_agent=verdict["next_agent"],
         )
 
     def to_report(self, invocation: Invocation) -> dict:
@@ -156,7 +165,7 @@ class AgentPool:
         return report
 
 
-def _prompt_for(brief: dict) -> str:
+def _prompt_for(brief: dict, ask_for_handoff: bool = False) -> str:
     context = brief["context"]
     ranked = "\n".join(
         f"  [{h['index']}] {h['label']}  p={h['probability']:.3f}"
@@ -172,6 +181,7 @@ def _prompt_for(brief: dict) -> str:
         f"  {context['unresolved_subtasks']} subtasks unresolved\n\n"
         f"YOUR BRIEF\n{brief['instruction']}\n"
         f"{REPORT_CONTRACT}"
+        f"{HANDOFF_CONTRACT if ask_for_handoff else ''}"
     )
 
 
@@ -192,6 +202,7 @@ def _parse_verdict(text: str) -> tuple[dict, bool]:
                     "confidence": _clamp(raw.get("confidence", 0.5)),
                     "summary": str(raw.get("summary") or "").strip(),
                     "claimed_hypothesis": int(claimed) if isinstance(claimed, (int, float)) else None,
+                    "next_agent": str(raw.get("next_agent") or "").strip().lower(),
                 },
                 True,
             )
@@ -205,6 +216,7 @@ def _parse_verdict(text: str) -> tuple[dict, bool]:
             "confidence": 0.2,
             "summary": first_line[:160] or "no structured verdict returned",
             "claimed_hypothesis": None,
+            "next_agent": "",
         },
         False,
     )

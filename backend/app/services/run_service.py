@@ -147,7 +147,7 @@ class RunService:
         return results
 
     # ----------------------------------------------------------- live mode
-    def live_open(self, run_id: str) -> dict:
+    def live_open(self, run_id: str, declared: tuple[str, list[str]] | None = None) -> dict:
         """Ask the policy who acts next and return their brief. State does not advance."""
         run = self._run(run_id)
         engine = self.engine_for(run_id)
@@ -156,7 +156,7 @@ class RunService:
         if engine.done:
             raise ValueError("Run has already terminated")
 
-        pending = engine.open_step(uuid.uuid4().hex)
+        pending = engine.open_step(uuid.uuid4().hex, declared)
         pending.run_id = run_id
         if run.status != "running":
             run.status = "running"

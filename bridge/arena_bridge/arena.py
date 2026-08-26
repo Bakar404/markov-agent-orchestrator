@@ -43,8 +43,8 @@ class Arena:
     def create_run(self, **payload: Any) -> dict:
         return self._request("POST", "/api/runs", json=payload)
 
-    def open_step(self, run_id: str) -> dict:
-        return self._request("POST", f"/api/runs/{run_id}/live/open")
+    def open_step(self, run_id: str, declared: dict | None = None) -> dict:
+        return self._request("POST", f"/api/runs/{run_id}/live/open", json=declared)
 
     def report_step(self, run_id: str, token: str, reports: list[dict]) -> dict:
         return self._request(

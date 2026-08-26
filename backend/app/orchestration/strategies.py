@@ -27,6 +27,11 @@ class Strategy:
     is_control: bool = False
     escalates: str = "learned"
     """``never``, ``always``, ``heuristic`` or ``learned`` — how it decides to orchestrate."""
+    external_driver: str = ""
+    """Names the outside orchestrator, when the arena is not the one choosing agents.
+
+    Worth surfacing rather than burying in the policy id: a reader comparing arms should be able
+    to see which ones the arena decided and which ones it only recorded."""
     policy_options: dict | None = None
 
     def to_dict(self) -> dict:
@@ -130,6 +135,57 @@ STRATEGIES: tuple[Strategy, ...] = (
         when="When you need to know which agent actually earned the outcome.",
         category="MARL",
         paper_query="value decomposition networks multi agent credit assignment",
+    ),
+    Strategy(
+        id="maf_sequential",
+        label="MAF Sequential Workflow",
+        policy="external",
+        summary=(
+            "Microsoft Agent Framework drives a fixed chain: plan, research, critique, verify. "
+            "One specialist per step, each seeing what came before."
+        ),
+        when=(
+            "The baseline shape of most agent frameworks. Compare it against the control "
+            "before assuming a published pattern beats one good agent."
+        ),
+        category="Agent Orchestration",
+        paper_query="multi agent LLM pipeline role decomposition",
+        escalates="always",
+        external_driver="microsoft-agent-framework",
+    ),
+    Strategy(
+        id="maf_concurrent",
+        label="MAF Concurrent Workflow",
+        policy="external",
+        summary=(
+            "Microsoft Agent Framework fans out to researcher, critic and verifier at once, "
+            "then folds their answers together."
+        ),
+        when=(
+            "When the subtasks are genuinely independent. Buys wall-clock time and pays for "
+            "it in fresh context per specialist."
+        ),
+        category="Agent Orchestration",
+        paper_query="concurrent multi agent fan out aggregation",
+        escalates="always",
+        external_driver="microsoft-agent-framework",
+    ),
+    Strategy(
+        id="maf_handoff",
+        label="MAF Handoff Workflow",
+        policy="external",
+        summary=(
+            "Each agent names who should act next, so the route through the team is chosen "
+            "by the agents rather than by a policy or a fixed order."
+        ),
+        when=(
+            "When the right specialist depends on what the last one found. The most "
+            "agent-directed of the three, and the easiest to send in circles."
+        ),
+        category="Agent Routing",
+        paper_query="agent handoff delegation routing language model",
+        escalates="always",
+        external_driver="microsoft-agent-framework",
     ),
 )
 

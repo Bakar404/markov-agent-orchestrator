@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..db import get_session
 from ..models import Run, RunVerdict
 from ..schemas import (
+    LiveOpenRequest,
     LiveReportRequest,
     RunCreate,
     RunResetRequest,
@@ -64,10 +65,18 @@ def step_run(
 
 
 @router.post("/{run_id}/live/open")
-def live_open(run_id: str, svc: RunService = Depends(service)) -> dict:
-    """Ask the policy who acts next. Returns briefs; does not advance the episode."""
+def live_open(
+    run_id: str, payload: LiveOpenRequest | None = None, svc: RunService = Depends(service)
+) -> dict:
+    """Ask the policy who acts next. Returns briefs; does not advance the episode.
+
+    Runs on the ``external`` policy have no choice to ask for — an outside orchestrator made it
+    — so those must declare ``action`` and ``agents`` here instead. Every other policy rejects
+    a declaration, or the caller could pick the result and call it a policy decision.
+    """
+    declared = (payload.action, payload.agents) if payload and payload.action else None
     try:
-        return svc.live_open(run_id)
+        return svc.live_open(run_id, declared)
     except RunNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
