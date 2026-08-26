@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RunCreate(BaseModel):
@@ -106,7 +106,14 @@ class PairwiseCreate(BaseModel):
 
 
 class LiveAgentReport(BaseModel):
-    """What one real agent invocation produced."""
+    """What one real agent invocation produced.
+
+    Every field here is required because the alternative is the engine inventing it. Omitted
+    tokens and cost used to fall back to the agent spec's base rates, which produced a cost
+    column that was arithmetic over the roster rather than anything a model actually spent.
+    If you cannot measure these, you are not running live -- use sim mode, which is honest
+    about being sampled.
+    """
 
     agent_id: str = Field(..., description="Agent the brief was issued to.")
     outcome: Literal["success", "partial", "failure"]
@@ -118,11 +125,23 @@ class LiveAgentReport(BaseModel):
         ge=0,
         description="Index of the hypothesis this response argued for. Omit if it argued for none.",
     )
-    response: str = Field("", max_length=20000, description="What the agent actually produced.")
+    response: str = Field(
+        ...,
+        min_length=1,
+        max_length=20000,
+        description="What the agent actually produced. Required: a step with no output is not work.",
+    )
     summary: str = Field("", max_length=400)
-    tokens: int | None = Field(None, ge=0, description="Measured; estimated from the spec if omitted.")
-    latency_ms: float | None = Field(None, ge=0.0)
-    cost_usd: float | None = Field(None, ge=0.0)
+    tokens: int = Field(..., ge=1, description="Measured token count for this invocation.")
+    latency_ms: float = Field(..., ge=0.0, description="Measured wall-clock time.")
+    cost_usd: float = Field(..., ge=0.0, description="Measured cost. Zero is valid; absent is not.")
+
+    @field_validator("response")
+    @classmethod
+    def _response_is_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("response cannot be blank")
+        return value
 
 
 class LiveReportRequest(BaseModel):
