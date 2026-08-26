@@ -204,3 +204,25 @@ So `RunConfig` gains `cost_unit`, constrained to `usd`, `tokens`, or `aiu` and f
 The field defaults to `usd` so existing runs keep their meaning, and `RunConfig.from_dict` already ignores unknown keys, so no stored run needs migrating.
 
 The cost is that the underlying field is still called `cost_usd` while now sometimes holding tokens, which is a name that lies about its contents. Renaming it touches the database, the API surface, the frontend types, and the CLI at once; the unit is recorded next to it instead, and the rename is deferred rather than pretended away.
+
+## DDL-020: drive episodes with Microsoft Agent Framework, and measure coordination as fresh tokens
+
+Follows DDL-015, DDL-016 and DDL-019. Two problems close together here: who drives the loop, and what the cost column is actually counting.
+
+A person driving `live/open` and `live/report` can fabricate a report, and did — DDL-015 exists because four of five control runs in the `agent-debt` experiment carried byte-identical placeholder summaries and a cost that was the agent roster's base rate every step. Guards were added, but the loop still depended on the driver choosing to be honest. Microsoft Agent Framework removes the choice: `bridge/` invokes `GitHubCopilotAgent` and every number it reports is read off the response object it just received. Nothing is available to invent. The framework is Microsoft-maintained, MIT-licensed and marked Production/Stable, so this is adopting an orchestration layer rather than writing a fourth one.
+
+The measurement problem is more interesting. Every Copilot CLI invocation carries roughly 15,800 tokens of fixed session context before the agent does any work. Measured here across three turns of one conversation:
+
+| turn | cache creation | cache read | fresh tokens processed |
+| --- | --- | --- | --- |
+| 1, new session | 9,157 | 6,647 | 9,343 |
+| 2, same session | 109 | 15,804 | 279 |
+| 3, same session | 114 | 15,913 | 345 |
+
+`total_token_count` sits near 16,000 in all three, because it counts cache reads at face value. Reporting that would have made every arm identical and the cost column meaningless. What separates them is `input − cache_read + output`: the tokens the provider had to process fresh. Opening a conversation costs about 34 times continuing one.
+
+That gap is not an artifact to correct away. It is the transaction cost DDL-017 adopted Coase to describe, arriving as a number: delegating to a fresh specialist means re-establishing context that a continuing conversation already has. So the bridge holds one session per agent id for the life of a run. A solo arm returning to the same agent amortises; an arm fanning out to specialists pays to establish each one. Neither is penalised by construction — the difference falls out of what was measured, and an orchestration arm that reuses its specialists across steps will show that too.
+
+Two smaller consequences. `RunCreate` now bounds the budget by unit, because a ceiling of 100 is sane in dollars and instantly exhausted in tokens, which would have produced zero-step runs that look like results. And an arm covered by blind pairwise comparisons no longer earns the "unjudged" caveat, since pairwise is the method this repository prefers over absolute scoring.
+
+The cost is a second virtualenv. The `agent-framework` packages pin `fastapi` and `websockets` below what the backend runs on, so installing them together downgrades both and breaks the API. `bridge/requirements.txt` documents the separation rather than resolving it.

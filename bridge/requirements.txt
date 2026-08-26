@@ -1,0 +1,12 @@
+# The bridge runs in its own virtualenv on purpose.
+#
+# The agent-framework meta-package pins fastapi 0.138.0 and websockets 16.1.1, which are older
+# than what the backend runs on. Installing this alongside the backend downgrades both and
+# breaks the API. Keep them separate:
+#
+#   py -m venv C:\venvs\arena-maf
+#   C:\venvs\arena-maf\Scripts\pip install -r bridge/requirements.txt
+
+agent-framework-core>=1.0.0
+agent-framework-github-copilot>=1.0.3
+httpx>=0.27

@@ -214,6 +214,32 @@ def test_distinct_reports_are_not_flagged(client):
     assert not any("DUPLICATE WORK" in c for c in payload["caveats"])
 
 
+def test_pairwise_judging_counts_as_judged(client):
+    """Pairwise is the preferred method here, so using it must not read as skipping judgement."""
+    control, _ = drive_live(
+        client, arm="control", seed=301, experiment="judged", summary="the solo answer"
+    )
+    rival, _ = drive_live(
+        client,
+        arm="always_orchestrate",
+        seed=301,
+        experiment="judged",
+        summary="the orchestrated answer",
+    )
+
+    before = client.get("/api/experiments/judged").json()["caveats"]
+    assert any("Unjudged arms" in c for c in before)
+
+    recorded = client.post(
+        "/api/experiments/judged/pairwise",
+        json={"run_a": control, "run_b": rival, "winner": "b", "judge": "test"},
+    )
+    assert recorded.status_code == 201
+
+    after = client.get("/api/experiments/judged").json()["caveats"]
+    assert not any("Unjudged arms" in c for c in after)
+
+
 def test_live_report_requires_measured_cost_and_tokens(client):
     """Omitted figures used to be invented from the agent spec. Now they are refused."""
     _, response = drive_live(

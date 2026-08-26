@@ -85,6 +85,40 @@ def test_run_lifecycle(client):
     assert client.get(f"/api/runs/{run_id}").status_code == 404
 
 
+def _budget_run(**overrides) -> dict:
+    payload = {
+        "task": "Find why p99 latency tripled after a logging-only deploy",
+        "strategy": "control",
+        "seed": 5,
+        "max_steps": 2,
+        "mode": "live",
+        "belief_dim": 4,
+        "hypotheses": ["h0", "h1", "h2", "h3"],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_budget_ceiling_scales_with_the_cost_unit(client):
+    # 250,000 is absurd in dollars and ordinary in tokens, so the bound cannot be a constant.
+    in_tokens = client.post(
+        "/api/runs", json=_budget_run(cost_unit="tokens", budget_usd=250_000)
+    )
+    assert in_tokens.status_code == 201
+    client.delete(f"/api/runs/{in_tokens.json()['id']}")
+
+    in_dollars = client.post("/api/runs", json=_budget_run(budget_usd=250_000))
+    assert in_dollars.status_code == 422
+    assert "ceiling" in in_dollars.text
+
+
+def test_a_dollar_budget_left_on_a_token_run_is_refused(client):
+    # Silently accepting 1.20 tokens produces a zero-step run that looks like a result.
+    response = client.post("/api/runs", json=_budget_run(cost_unit="tokens"))
+    assert response.status_code == 422
+    assert "too small to be denominated" in response.text
+
+
 def test_research_library_is_seeded_and_queryable(client):
     stats = client.get("/api/research/stats").json()
     assert stats["papers"] >= 30

@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+BUDGET_CEILING = {"usd": 100.0, "aiu": 5_000.0, "tokens": 20_000_000.0}
+"""Upper bound per unit. Loose enough not to obstruct, tight enough that a unit mix-up trips it."""
+
+BUDGET_FLOOR = {"usd": 0.0, "aiu": 1.0, "tokens": 1_000.0}
+"""Below this a budget is almost certainly still denominated in dollars."""
 
 
 class RunCreate(BaseModel):
@@ -25,7 +31,14 @@ class RunCreate(BaseModel):
     )
     seed: int | None = Field(None, ge=0, le=2**31 - 1, description="Omit for a random seed.")
     task_complexity: float = Field(0.55, ge=0.05, le=0.99)
-    budget_usd: float = Field(1.20, gt=0.0, le=100.0)
+    budget_usd: float = Field(
+        1.20,
+        gt=0.0,
+        description=(
+            "Spending cap, denominated in `cost_unit`. The ceiling scales with the unit: a "
+            "budget of 100 is generous in dollars and absurd in tokens."
+        ),
+    )
     latency_budget_ms: float = Field(90_000.0, gt=0.0, le=6_000_000.0)
     max_steps: int = Field(40, ge=1, le=500)
     belief_dim: int = Field(8, ge=3, le=32)
@@ -79,6 +92,23 @@ class RunCreate(BaseModel):
         default_factory=dict,
         description="Extra policy constructor arguments, e.g. {'agent_id': 'researcher'}.",
     )
+
+    @model_validator(mode="after")
+    def _budget_fits_the_unit(self) -> RunCreate:
+        ceiling = BUDGET_CEILING[self.cost_unit]
+        if self.budget_usd > ceiling:
+            raise ValueError(
+                f"budget {self.budget_usd:,.0f} exceeds the {ceiling:,.0f} ceiling for "
+                f"cost_unit '{self.cost_unit}'"
+            )
+        # The default budget of 1.20 is sane in dollars and instantly exhausted in tokens, which
+        # would produce a zero-step run that looks like a result rather than a mistake.
+        if self.cost_unit != "usd" and self.budget_usd <= BUDGET_FLOOR[self.cost_unit]:
+            raise ValueError(
+                f"budget {self.budget_usd:,.2f} is too small to be denominated in "
+                f"'{self.cost_unit}' — set one explicitly"
+            )
+        return self
 
 
 class VerdictCreate(BaseModel):
