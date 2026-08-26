@@ -1,0 +1,13 @@
+{
+  "name": "arena-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runs a paired control-versus-orchestration experiment from the terminal, in the arena's colours.",
+  "type": "module",
+  "bin": {
+    "arena": "./bin/arena.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
