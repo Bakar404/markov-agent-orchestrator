@@ -461,7 +461,13 @@ class ExperimentService:
                 "roster's rates times the number of calls — arithmetic you could do without "
                 "running anything. Supply cost_usd and tokens on every report."
             )
-        unjudged = [a["arm"] for a in arms if a["mean_quality"] is None]
+        # Pairwise is the preferred way to judge here, so an arm covered by head-to-head
+        # comparisons is not unjudged just because nobody recorded an absolute score for it.
+        unjudged = [
+            a["arm"]
+            for a in arms
+            if a["mean_quality"] is None and not (a.get("pairwise") or {}).get("comparisons")
+        ]
         if unjudged:
             notes.append(
                 f"Unjudged arms: {', '.join(unjudged)}. Cost without quality cannot tell you "
