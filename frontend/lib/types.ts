@@ -150,6 +150,7 @@ export interface ExperimentArm {
   runs: number;
   seeds: number[];
   modes: string[];
+  cost_units: string[];
   goal_reached: number;
   escalated: number;
   mean_cost_usd: number;
@@ -169,6 +170,8 @@ export interface ExperimentComparison {
   control_arm: string | null;
   modes: string[];
   mode: string;
+  cost_units: string[];
+  cost_unit: string;
   arms: ExperimentArm[];
   verdict: string;
   caveats: string[];

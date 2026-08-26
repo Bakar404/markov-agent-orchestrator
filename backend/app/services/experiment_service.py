@@ -88,16 +88,19 @@ class ExperimentService:
                 arm["vs_control"] = self._paired_delta(by_arm[arm["arm"]], control, verdicts)
 
         modes = sorted({self._mode_of(r) for r in runs})
+        units = sorted({self._cost_unit_of(r) for r in runs})
         return {
             "experiment": experiment,
             "tasks": sorted({run.task for run in runs}),
             "control_arm": CONTROL_ARM if control else None,
             "modes": modes,
             "mode": modes[0] if len(modes) == 1 else "mixed",
+            "cost_units": units,
+            "cost_unit": units[0] if len(units) == 1 else "mixed",
             "unstarted_runs": unstarted,
             "arms": arms,
             "verdict": self._headline(arms),
-            "caveats": self._caveats(arms, control, modes, unstarted),
+            "caveats": self._caveats(arms, control, modes, unstarted, units),
         }
 
     def _pairwise(self, experiment: str, arm_of_run: dict[str, str]) -> dict[str, dict]:
@@ -158,6 +161,10 @@ class ExperimentService:
     def _mode_of(run: Run) -> str:
         return str((run.config or {}).get("mode") or "sim")
 
+    @staticmethod
+    def _cost_unit_of(run: Run) -> str:
+        return str((run.config or {}).get("cost_unit") or "usd")
+
     def _duplicate_runs(self, members: list[Run]) -> int:
         """Runs whose reported work is byte-identical to another run in the same arm.
 
@@ -212,6 +219,7 @@ class ExperimentService:
             "runs": len(members),
             "seeds": sorted({r.seed for r in members}),
             "modes": sorted({self._mode_of(r) for r in members}),
+            "cost_units": sorted({self._cost_unit_of(r) for r in members}),
             "unmetered_reports": sum(
                 int((r.current_state or {}).get("unmetered_reports") or 0) for r in members
             ),
@@ -372,9 +380,20 @@ class ExperimentService:
 
     @staticmethod
     def _caveats(
-        arms: list[dict], control: list[Run] | None, modes: list[str], unstarted: int = 0
+        arms: list[dict],
+        control: list[Run] | None,
+        modes: list[str],
+        unstarted: int = 0,
+        units: list[str] | None = None,
     ) -> list[str]:
         notes: list[str] = []
+
+        if units and len(units) > 1:
+            notes.append(
+                f"MIXED COST UNITS: arms in this experiment measured cost in "
+                f"{' and '.join(units)}. Subtracting one from the other produces a number with "
+                "no meaning. Re-run the arms under a single unit."
+            )
 
         if unstarted:
             notes.append(

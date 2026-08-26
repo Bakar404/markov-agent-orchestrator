@@ -72,6 +72,7 @@ class RunService:
             hypotheses=list(payload.hypotheses),
             task_shape=dict(payload.task_shape),
             default_model=payload.default_model,
+            cost_unit=payload.cost_unit,
             agent_models=dict(payload.agent_models),
             experiment=payload.experiment,
             arm=arm,
