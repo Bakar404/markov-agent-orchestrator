@@ -71,6 +71,8 @@ class RunService:
             mode=payload.mode,
             hypotheses=list(payload.hypotheses),
             task_shape=dict(payload.task_shape),
+            default_model=payload.default_model,
+            agent_models=dict(payload.agent_models),
             experiment=payload.experiment,
             arm=arm,
             policy_options=policy_options,

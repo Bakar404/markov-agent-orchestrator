@@ -65,6 +65,12 @@ class AgentBrief:
     instruction: str
     hypotheses: list[str]
     context: dict
+    model: str = ""
+    """Which model should answer this brief. Empty means the caller's default.
+
+    This is what makes a tiered arm expressible: an expensive orchestrator delegating to cheap
+    workers is a different economic proposition from one expensive agent working alone, and the
+    comparison is only interesting when both arms are held to the same budget."""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -105,6 +111,7 @@ def build_brief(
     state: OrchestratorState,
     task: str,
     hypotheses: list[str],
+    model: str = "",
 ) -> AgentBrief:
     """Describe one agent's job for this step, grounded in the current state."""
     belief = state.belief_probabilities
@@ -119,6 +126,7 @@ def build_brief(
         role=spec.role,
         instruction=ROLE_INSTRUCTIONS.get(spec.id, spec.description),
         hypotheses=list(hypotheses),
+        model=model,
         context={
             "task": task,
             "step": state.step,
