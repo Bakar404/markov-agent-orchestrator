@@ -149,8 +149,17 @@ def test_comparison_refuses_to_rank_on_internal_reward(client):
 # --------------------------------------------------- guards against bad input
 
 
-def drive_live(client, *, arm: str, seed: int, experiment: str, summary: str, metered: bool = True):
-    """Drive a two-step live run. Steps differ from each other; seeds repeat the same pair."""
+def drive_live(
+    client,
+    *,
+    arm: str,
+    seed: int,
+    experiment: str,
+    summary: str,
+    metered: bool = True,
+    steps: int = 2,
+):
+    """Drive a live run. Steps differ from each other; seeds repeat the same sequence."""
     body = {
         "task": "does adding agents help",
         "strategy": arm,
@@ -158,13 +167,13 @@ def drive_live(client, *, arm: str, seed: int, experiment: str, summary: str, me
         "seed": seed,
         "experiment": experiment,
         "mode": "live",
-        "max_steps": 2,
+        "max_steps": steps,
         "budget_usd": 5.0,
     }
     run_id = client.post("/api/runs", json=body).json()["id"]
 
     last = None
-    for step in range(2):
+    for step in range(steps):
         opened = client.post(f"/api/runs/{run_id}/live/open").json()
         reports = []
         for agent_id in opened["agents"]:
@@ -212,6 +221,71 @@ def test_distinct_reports_are_not_flagged(client):
 
     assert arm["duplicate_runs"] == 0
     assert not any("DUPLICATE WORK" in c for c in payload["caveats"])
+
+
+def test_an_arm_cut_short_is_not_silently_compared(client):
+    """A run stopped by an outage looks cheap for a reason unrelated to how it orchestrates."""
+    drive_live(client, arm="control", seed=401, experiment="uneven", summary="full run", steps=5)
+    drive_live(
+        client,
+        arm="always_orchestrate",
+        seed=401,
+        experiment="uneven",
+        summary="cut short by an outage",
+        steps=1,
+    )
+
+    payload = client.get("/api/experiments/uneven").json()
+    assert payload["lopsided_seeds"] == [401]
+    assert any("UNEVEN RUNS" in c for c in payload["caveats"])
+
+
+def test_arms_of_similar_length_are_not_flagged(client):
+    drive_live(client, arm="control", seed=402, experiment="even", summary="a full run", steps=5)
+    drive_live(
+        client, arm="always_orchestrate", seed=402, experiment="even", summary="also full", steps=5
+    )
+
+    payload = client.get("/api/experiments/even").json()
+    assert payload["lopsided_seeds"] == []
+    assert not any("UNEVEN RUNS" in c for c in payload["caveats"])
+
+
+def test_a_decisive_control_win_is_reported_even_when_another_arm_did_better(client):
+    """A challenger that loses every comparison is as informative as one that wins every one."""
+    for seed in range(601, 606):
+        control, _ = drive_live(
+            client, arm="control", seed=seed, experiment="swept", summary=f"solo {seed}"
+        )
+        swept, _ = drive_live(
+            client,
+            arm="always_orchestrate",
+            seed=seed,
+            experiment="swept",
+            summary=f"swept {seed}",
+        )
+        close, _ = drive_live(
+            client, arm="cascade", seed=seed, experiment="swept", summary=f"close {seed}"
+        )
+        # always_orchestrate loses every pair; cascade splits, so it has the better win rate
+        # and would previously have been the only arm the headline looked at.
+        client.post(
+            "/api/experiments/swept/pairwise",
+            json={"run_a": control, "run_b": swept, "winner": "a", "judge": "test"},
+        )
+        client.post(
+            "/api/experiments/swept/pairwise",
+            json={
+                "run_a": control,
+                "run_b": close,
+                "winner": "a" if seed % 2 else "b",
+                "judge": "test",
+            },
+        )
+
+    verdict = client.get("/api/experiments/swept").json()["verdict"]
+    assert "The control won" in verdict, verdict
+    assert "always_orchestrate" in verdict, verdict
 
 
 def test_pairwise_judging_counts_as_judged(client):

@@ -29,6 +29,16 @@ class ArmResult:
     final_answer: str
     driver: str
     """``arena`` when the policy chose the agents, or the workflow that chose them instead."""
+    stalled_reports: int = 0
+    """How many times an agent restated work the run already had.
+
+    A solo agent given enough steps eventually runs out of new material, which is a finding
+    about long single-agent runs rather than a glitch, so it is counted rather than hidden."""
+    complete: bool = True
+    """False when the arm stopped early because the model stopped answering.
+
+    An arm that ran fewer steps than its peers is not comparable to them, so this travels with
+    the result rather than being inferred from a step count that looks merely low."""
 
 
 async def drive_arm(
@@ -45,6 +55,9 @@ async def drive_arm(
     latency_budget_ms: float,
     default_model: str,
     agent_models: dict[str, str] | None = None,
+    agent_timeout_s: float = 300.0,
+    retries: int = 2,
+    retry_pause_s: float = 20.0,
     on_event=None,
 ) -> ArmResult:
     def emit(kind: str, **payload: object) -> None:
@@ -71,7 +84,7 @@ async def drive_arm(
     emit("run_created", run_id=run_id, watch=f"http://localhost:3000/?run={run_id}")
 
     workflow = build_workflow(arm)
-    pool = AgentPool(default_model=default_model)
+    pool = AgentPool(default_model=default_model, timeout=agent_timeout_s)
     total_tokens = 0
     new_tokens = 0
     escalated = False
@@ -81,6 +94,9 @@ async def drive_arm(
     handoff_hint = ""
     steps = 0
     reason = "max_steps"
+    complete = True
+    sent_summaries: set[str] = set()
+    stalled = 0
     # Every response carries the current preview, so the workflow can pick from what is
     # actually legal without the driver asking separately.
     legal = list(run["preview"]["legal_actions"])
@@ -106,14 +122,28 @@ async def drive_arm(
 
         # A fan-out step runs its agents at once, because wall clock is what the concurrent
         # pattern is buying. Reporting them one after another would price it as a serial chain.
-        invocations: list[Invocation] = list(
-            await asyncio.gather(
-                *(
-                    pool.invoke(brief, ask_for_handoff=arm == "maf_handoff")
-                    for brief in pending["briefs"]
-                )
-            )
+        settled = await asyncio.gather(
+            *(
+                pool.invoke(brief, ask_for_handoff=arm == "maf_handoff")
+                for brief in pending["briefs"]
+            ),
+            return_exceptions=True,
         )
+        broken = [r for r in settled if isinstance(r, BaseException)]
+        if broken:
+            # Nothing measurable came back, and inventing a cost for it is the fabrication the
+            # arena refuses everywhere else. Drop the step so no false step is recorded.
+            arena.abandon(run_id)
+            emit("step_lost", step=pending["step"], detail=str(broken[0]), retries_left=retries)
+            if retries > 0:
+                retries -= 1
+                await asyncio.sleep(retry_pause_s)
+                continue
+            reason = "agent_unavailable"
+            complete = False
+            break
+
+        invocations: list[Invocation] = list(settled)  # type: ignore[arg-type]
         for invocation in invocations:
             if not invocation.parsed:
                 unparsed += 1
@@ -131,6 +161,22 @@ async def drive_arm(
                 parsed=invocation.parsed,
             )
         reports = [pool.to_report(inv) for inv in invocations]
+        for report in reports:
+            # An agent that restates what it already said has not made progress, and the arena
+            # refuses the replay outright. That is a real outcome on a long solo run rather than
+            # an error, so record it as a failure instead of losing the arm to it.
+            if report["summary"] in sent_summaries:
+                report["outcome"] = "failure"
+                report["confidence"] = 0.05
+                report["summary"] = (
+                    f"{report['agent_id']} repeated earlier output at step "
+                    f"{pending['step']}; no new progress"
+                )
+                report.pop("claimed_hypothesis", None)
+                stalled += 1
+                emit("agent_stalled", agent=report["agent_id"], step=pending["step"])
+            sent_summaries.add(report["summary"])
+
         reported = arena.report_step(run_id, pending["token"], reports)
         result = reported["step"]
         legal = list(reported["run"]["preview"]["legal_actions"])
@@ -165,4 +211,6 @@ async def drive_arm(
         unparsed_reports=unparsed,
         final_answer="\n\n".join(last_texts).strip(),
         driver=workflow.name if workflow else "arena",
+        stalled_reports=stalled,
+        complete=complete,
     )

@@ -59,6 +59,13 @@ def log(kind: str, payload: dict) -> None:
         )
     elif kind == "open_refused":
         say(f"{head} {payload['detail']}")
+    elif kind == "step_lost":
+        say(
+            f"{head} step {payload['step']} lost: {payload['detail']}"
+            f"  ({payload['retries_left']} retries left)"
+        )
+    elif kind == "agent_stalled":
+        say(f"{head}   {payload['agent']} repeated itself at step {payload['step']}")
 
 
 async def main() -> int:
@@ -95,6 +102,12 @@ async def main() -> int:
     parser.add_argument("--orchestrator-model", default="claude-opus-5")
     parser.add_argument("--worker-model", default="claude-haiku-4.5")
     parser.add_argument("--judge-model", default="gpt-5.4")
+    parser.add_argument(
+        "--agent-timeout-s",
+        type=float,
+        default=300.0,
+        help="A haiku call takes 10-25s, so a wait this long means the session has hung.",
+    )
     args = parser.parse_args()
 
     arms = args.arms or [CONTROL, "cascade"]
@@ -134,31 +147,49 @@ async def main() -> int:
             # the specialists do the work.
             for arm in sorted(arms, key=lambda a: a != CONTROL):
                 say(f"\n=== {arm}  seed {seed} ===")
-                result = await drive_arm(
-                    arena,
-                    arm=arm,
-                    strategy=arm,
-                    seed=seed,
-                    task=args.task,
-                    experiment=args.experiment,
-                    hypotheses=args.hypotheses,
-                    max_steps=args.max_steps,
-                    budget=args.budget,
-                    latency_budget_ms=args.latency_budget_ms,
-                    default_model=args.orchestrator_model,
-                    agent_models=agent_models,
-                    on_event=log,
-                )
+                try:
+                    result = await drive_arm(
+                        arena,
+                        arm=arm,
+                        strategy=arm,
+                        seed=seed,
+                        task=args.task,
+                        experiment=args.experiment,
+                        hypotheses=args.hypotheses,
+                        max_steps=args.max_steps,
+                        budget=args.budget,
+                        latency_budget_ms=args.latency_budget_ms,
+                        default_model=args.orchestrator_model,
+                        agent_models=agent_models,
+                        agent_timeout_s=args.agent_timeout_s,
+                        on_event=log,
+                    )
+                except Exception as exc:  # noqa: BLE001 - one arm must not cost the rest
+                    say(f"    ABANDONED: {type(exc).__name__}: {exc}")
+                    continue
                 results[seed][arm] = result
                 say(
                     f"    {result.steps} steps, driven by {result.driver}, "
                     f"{result.new_tokens:,} fresh tokens, ended on {result.terminated_reason}"
+                    f"{f',  {result.stalled_reports} stalled' if result.stalled_reports else ''}"
+                    f"{'' if result.complete else '  [INCOMPLETE]'}"
                 )
 
         say("\n=== blind pairwise judging ===")
         judge = Judge(args.judge_model)
         challengers = [a for a in arms if a != CONTROL]
         for seed, by_arm in results.items():
+            # A seed is only a paired comparison if every arm actually finished it. Judging a
+            # truncated answer against a complete one measures the outage, not the pattern.
+            missing = [a for a in arms if a not in by_arm]
+            truncated = [a for a, r in by_arm.items() if not r.complete]
+            if missing or truncated:
+                say(
+                    f"  seed {seed}: not judged — "
+                    f"{', '.join(missing + truncated)} did not finish"
+                )
+                continue
+
             control = by_arm[CONTROL]
             for arm in challengers:
                 other = by_arm[arm]

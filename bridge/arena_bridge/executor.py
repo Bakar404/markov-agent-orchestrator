@@ -28,6 +28,15 @@ from agent_framework.github import GitHubCopilotAgent, GitHubCopilotOptions
 JSON_BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
 BARE_OBJECT = re.compile(r"(\{[^{}]*\"outcome\"[^{}]*\})", re.DOTALL)
 
+
+class AgentUnavailable(RuntimeError):
+    """The call did not return, so there is no measurement to report.
+
+    Distinct from an agent that failed its brief: that is a result, and it comes back with real
+    token counts. This is the absence of a result. Reporting a guessed cost for it would be the
+    same fabrication the arena refuses everywhere else, so the step gets abandoned instead.
+    """
+
 REPORT_CONTRACT = """
 When you have finished, end your reply with a fenced json block in exactly this shape:
 
@@ -88,7 +97,7 @@ class AgentPool:
     """One agent and one session per agent id, held for the life of a run."""
 
     default_model: str
-    timeout: float = 600.0
+    timeout: float = 300.0
     _agents: dict[str, tuple[GitHubCopilotAgent, Any, str]] = field(default_factory=dict)
 
     def _agent_for(self, brief: dict) -> tuple[GitHubCopilotAgent, Any, str]:
@@ -114,7 +123,12 @@ class AgentPool:
     async def invoke(self, brief: dict, *, ask_for_handoff: bool = False) -> Invocation:
         agent, session, model = self._agent_for(brief)
         started = time.perf_counter()
-        response = await agent.run(_prompt_for(brief, ask_for_handoff), session=session)
+        try:
+            response = await agent.run(_prompt_for(brief, ask_for_handoff), session=session)
+        except Exception as exc:
+            # A dead session stays dead, so drop it and let a retry establish a new one.
+            self._agents.pop(brief["agent_id"], None)
+            raise AgentUnavailable(f"{brief['agent_id']} on {model}: {exc}") from exc
         latency_ms = (time.perf_counter() - started) * 1000.0
 
         usage = dict(response.usage_details or {})
@@ -124,7 +138,7 @@ class AgentPool:
         new_tokens = max(int(usage.get("input_token_count") or 0) - cached, 0) + output
 
         text = (response.text or "").strip()
-        verdict, parsed = _parse_verdict(text)
+        verdict, parsed = _parse_verdict(text, len(brief["hypotheses"]))
 
         return Invocation(
             agent_id=brief["agent_id"],
@@ -185,7 +199,7 @@ def _prompt_for(brief: dict, ask_for_handoff: bool = False) -> str:
     )
 
 
-def _parse_verdict(text: str) -> tuple[dict, bool]:
+def _parse_verdict(text: str, belief_dim: int) -> tuple[dict, bool]:
     """Pull the json block out of the reply, and degrade honestly when it is absent."""
     match = JSON_BLOCK.search(text) or BARE_OBJECT.search(text)
     if match:
@@ -195,13 +209,14 @@ def _parse_verdict(text: str) -> tuple[dict, bool]:
             raw = None
         if isinstance(raw, dict):
             outcome = str(raw.get("outcome", "partial")).strip().lower()
-            claimed = raw.get("claimed_hypothesis")
             return (
                 {
                     "outcome": outcome if outcome in {"success", "partial", "failure"} else "partial",
                     "confidence": _clamp(raw.get("confidence", 0.5)),
                     "summary": str(raw.get("summary") or "").strip(),
-                    "claimed_hypothesis": int(claimed) if isinstance(claimed, (int, float)) else None,
+                    "claimed_hypothesis": _hypothesis_index(
+                        raw.get("claimed_hypothesis"), belief_dim
+                    ),
                     "next_agent": str(raw.get("next_agent") or "").strip().lower(),
                 },
                 True,
@@ -224,6 +239,19 @@ def _parse_verdict(text: str) -> tuple[dict, bool]:
 
 def _without_json_block(text: str) -> str:
     return JSON_BLOCK.sub("", text).strip()
+
+
+def _hypothesis_index(value: object, belief_dim: int) -> int | None:
+    """Keep the claim only if it names a hypothesis that exists.
+
+    Models sometimes count the list from one. An index past the end is not a claim about the
+    last hypothesis, it is a claim about nothing, and the arena treats an absent claim as
+    concentrating no belief mass — which is the honest reading.
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    index = int(value)
+    return index if 0 <= index < belief_dim else None
 
 
 def _clamp(value: object) -> float:
