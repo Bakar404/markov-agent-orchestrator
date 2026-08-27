@@ -238,3 +238,27 @@ Two properties keep this from becoming an escape hatch. A declaration drives exa
 Two things the first live run of this exposed. The API's 90-second latency budget was sized for sampled timings, and a real call takes 10 to 25 seconds, so every run was ending on `latency_exhausted` after four steps rather than on its own terms; the bridge now sets it explicitly. And a fan-out step was invoking its agents one after another, which prices the concurrent pattern as a serial chain and discards the wall-clock saving that is the entire reason to use it — those calls now run together, which is also what the transition kernel already assumed when it modelled coalition latency as the slowest member plus coordination overhead.
 
 The cost is that `strategy` no longer implies the arena decided anything. `Strategy` gained an `external_driver` field naming the outside orchestrator so a reader comparing arms can see which ones the arena chose and which ones it only recorded, rather than having to infer it from the policy id.
+
+## DDL-022: report a decisive loss as loudly as a decisive win
+
+The first complete five-seed experiment produced a significant result and the verdict line refused to say so.
+
+`_headline` picked the challenger with the highest win rate, checked whether that arm's record was significant, and returned "no verdict" when it was not. On this experiment the best challenger had won 2 of 5, which is a coin flip — but the other challenger had won **0 of 5**, which clears the same threshold from the other side. The tool could announce that orchestration beat the control and could not announce that the control beat orchestration, which is a bias in what the instrument is able to say rather than in the data.
+
+The headline now looks for a significant winner first, then a significant loser, and only reports no verdict when neither exists. The cost multiple is attached to both, because "lost every comparison at three times the cost" is the sentence a reader needs and "lost every comparison" alone is not.
+
+### What the experiment measured
+
+Five seeds, eight steps, one task, every agent on `claude-haiku-4.5`, judged blind by `gpt-5.4` in a session that never saw either answer written. Cost is fresh tokens as defined in DDL-020.
+
+| arm | fresh tokens | vs control | blind record |
+| --- | --- | --- | --- |
+| `control` | 33,665 | — | — |
+| `maf_handoff` | 75,550 | 2.24x | won 2 of 5 |
+| `maf_concurrent` | 102,695 | 3.05x | won 0 of 5 |
+
+Both cost differences are around ten standard errors, and the paired step delta is 0.0 with a standard error of 0.0 — every arm ran exactly eight steps, so the gap is not an artifact of one arm being cut short. The concurrent arm's latency multiple is 1.66x rather than 3.05x, because its fan-out runs in parallel: the pattern does buy wall-clock time, it simply did not buy quality here.
+
+The claim this supports is narrow. One task, one model, one judge, five seeds, and a 5-of-5 sweep clears `|p - 0.5| > 1/sqrt(n)` by 0.053. It is evidence that on this task, concurrent fan-out cost three times as much and produced answers a blind judge preferred less, every time. It is not evidence about orchestration in general, and the handoff arm's 2-of-5 is not evidence of anything at all.
+
+A caveat that no longer fires is worth recording too. Earlier attempts at this experiment lost the control arm on two seeds to the replay guard, because a solo agent given eight steps ran out of new material and restated itself. Those runs were shorter, and shorter runs are cheaper, which biased the cost comparison toward the conclusion being tested. The runs were deleted rather than caveated, and the driver now reports a repetition as a `failure` outcome so the arm continues and the stall is counted.

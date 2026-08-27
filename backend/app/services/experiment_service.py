@@ -89,6 +89,7 @@ class ExperimentService:
 
         modes = sorted({self._mode_of(r) for r in runs})
         units = sorted({self._cost_unit_of(r) for r in runs})
+        lopsided = self._lopsided_seeds(by_arm)
         return {
             "experiment": experiment,
             "tasks": sorted({run.task for run in runs}),
@@ -98,10 +99,30 @@ class ExperimentService:
             "cost_units": units,
             "cost_unit": units[0] if len(units) == 1 else "mixed",
             "unstarted_runs": unstarted,
+            "lopsided_seeds": lopsided,
             "arms": arms,
             "verdict": self._headline(arms),
-            "caveats": self._caveats(arms, control, modes, unstarted, units),
+            "caveats": self._caveats(arms, control, modes, unstarted, units, lopsided),
         }
+
+    @staticmethod
+    def _lopsided_seeds(by_arm: dict[str, list[Run]]) -> list[int]:
+        """Seeds where one arm ran far fewer steps than another.
+
+        Cost is roughly linear in steps, so an arm cut short by an outage looks cheap for a
+        reason that has nothing to do with how it orchestrates. Pairing against it produces a
+        difference that reads like a finding and is really a record of the shorter run.
+        """
+        steps_by_seed: dict[int, list[int]] = defaultdict(list)
+        for members in by_arm.values():
+            for run in members:
+                steps_by_seed[run.seed].append(run.step_count)
+
+        return sorted(
+            seed
+            for seed, steps in steps_by_seed.items()
+            if len(steps) > 1 and min(steps) < 0.6 * max(steps)
+        )
 
     def _pairwise(self, experiment: str, arm_of_run: dict[str, str]) -> dict[str, dict]:
         """Win/loss/tie per arm from blind head-to-head comparisons."""
@@ -317,26 +338,42 @@ class ExperimentService:
             a for a in arms if a["arm"] != CONTROL_ARM and (a.get("pairwise") or {}).get("decisive")
         ]
         if contested:
-            best = max(contested, key=lambda a: a["pairwise"]["win_rate"] or 0.0)
-            pw = best["pairwise"]
-            multiple = ((best["vs_control"] or {}).get("cost_usd") or {}).get("multiple")
-            # An unmetered arm's cost is the agent spec's base rate times the number of calls,
-            # which is arithmetic over the roster rather than anything the run measured.
-            metered = not ExperimentService._cost_is_derived(best)
-            cost_note = f" at {multiple}x the cost" if multiple and metered else ""
-            if not pw["significant"]:
-                return (
-                    f"No verdict: '{best['arm']}' won {pw['wins']} of {pw['decisive']} blind "
-                    "comparisons, which a fair coin would produce often enough. Judge more pairs."
-                )
-            if pw["win_rate"] > 0.5:
+
+            def cost_note(arm: dict) -> str:
+                multiple = ((arm["vs_control"] or {}).get("cost_usd") or {}).get("multiple")
+                # An unmetered arm's cost is the agent spec's base rate times the number of
+                # calls, which is arithmetic over the roster rather than a measurement.
+                if not multiple or ExperimentService._cost_is_derived(arm):
+                    return ""
+                return f" at {multiple}x the cost"
+
+            significant = [a for a in contested if a["pairwise"]["significant"]]
+            winners = [a for a in significant if a["pairwise"]["win_rate"] > 0.5]
+            if winners:
+                best = max(winners, key=lambda a: a["pairwise"]["win_rate"])
+                pw = best["pairwise"]
                 return (
                     f"'{best['arm']}' beat the control in {pw['wins']} of {pw['decisive']} blind "
-                    f"comparisons ({pw['win_rate']:.0%}){cost_note}."
+                    f"comparisons ({pw['win_rate']:.0%}){cost_note(best)}."
                 )
+
+            # A challenger that decisively lost is as informative as one that decisively won,
+            # and reporting only the arm with the best win rate hides it.
+            losers = [a for a in significant if a["pairwise"]["win_rate"] < 0.5]
+            if losers:
+                worst = min(losers, key=lambda a: a["pairwise"]["win_rate"])
+                pw = worst["pairwise"]
+                return (
+                    f"The control won: '{worst['arm']}' took only {pw['wins']} of "
+                    f"{pw['decisive']} blind comparisons{cost_note(worst)}. Orchestration is not "
+                    "paying for itself here."
+                )
+
+            closest = max(contested, key=lambda a: abs((a["pairwise"]["win_rate"] or 0.0) - 0.5))
+            pw = closest["pairwise"]
             return (
-                f"The control won: '{best['arm']}' took only {pw['wins']} of {pw['decisive']} "
-                "blind comparisons. Orchestration is not paying for itself here."
+                f"No verdict: '{closest['arm']}' won {pw['wins']} of {pw['decisive']} blind "
+                "comparisons, which a fair coin would produce often enough. Judge more pairs."
             )
 
         # Judged, but every comparison was a tie. That is a finding, not a missing verdict.
@@ -385,8 +422,18 @@ class ExperimentService:
         modes: list[str],
         unstarted: int = 0,
         units: list[str] | None = None,
+        lopsided: list[int] | None = None,
     ) -> list[str]:
         notes: list[str] = []
+
+        if lopsided:
+            listed = ", ".join(str(s) for s in lopsided)
+            notes.append(
+                f"UNEVEN RUNS: on seed(s) {listed} one arm ran far fewer steps than another. "
+                "Cost is roughly linear in steps, so the shorter arm looks cheap for a reason "
+                "unrelated to how it orchestrates. Re-run those seeds before reading the cost "
+                "difference."
+            )
 
         if units and len(units) > 1:
             notes.append(
