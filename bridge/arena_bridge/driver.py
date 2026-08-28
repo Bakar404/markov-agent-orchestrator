@@ -104,7 +104,9 @@ async def drive_arm(
     while steps < max_steps:
         declared = None
         if workflow is not None:
-            choice = workflow.choose(legal=legal, last_agents=last_agents, hint=handoff_hint)
+            choice = await workflow.choose(
+                legal=legal, last_agents=last_agents, hint=handoff_hint
+            )
             declared = {"action": choice.action, "agents": choice.agents}
 
         try:

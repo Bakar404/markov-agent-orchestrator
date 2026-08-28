@@ -1,8 +1,12 @@
-"""Microsoft Agent Framework workflow patterns, expressed as arena arms.
+"""Hand-rolled routing patterns, kept as the reference the framework arms are checked against.
 
-Each pattern answers "who acts next?" differently, and that answer is the thing under test. The
-arena's ``external`` policy records the choice instead of making one, so what gets compared is
-the framework's pattern rather than a wrapper around it.
+These reimplement sequential, concurrent and handoff routing in about a hundred lines. They are
+named ``hand_rolled_*`` because that is what they are: an arm called after a framework pattern
+while containing none of that framework was measuring this approximation instead of the thing.
+The real framework graphs live in :mod:`maf_graph`.
+
+They stay because they are the control for the port. A framework arm that does not reproduce the
+behaviour of its hand-rolled twin has changed something other than its plumbing.
 
 The arena's rules still apply, and that is deliberate. Specialists have to be earned: the arena
 will not make ``escalate`` legal until the generalist has attempted the work solo, so every
@@ -17,14 +21,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .maf_adapter import Choice, GraphWorkflow
+from .maf_graph import GRAPHS
+
 SPECIALISTS = ("planner", "researcher", "critic", "verifier", "memory", "executor")
 SOLO_ACTION = {agent: f"invoke_{agent}" for agent in (*SPECIALISTS, "generalist")}
-
-
-@dataclass
-class Choice:
-    action: str
-    agents: list[str]
 
 
 @dataclass
@@ -33,7 +34,7 @@ class Workflow:
 
     name: str = "workflow"
 
-    def choose(self, *, legal: list[str], last_agents: list[str], hint: str) -> Choice:
+    async def choose(self, *, legal: list[str], last_agents: list[str], hint: str) -> Choice:
         opening = self._opening(legal)
         return opening if opening is not None else self._pattern(last_agents, hint, legal)
 
@@ -58,7 +59,7 @@ class Sequential(Workflow):
     elaborate is worth building.
     """
 
-    name: str = "maf_sequential"
+    name: str = "hand_rolled_sequential"
     order: tuple[str, ...] = ("planner", "researcher", "critic", "verifier")
     _index: int = 0
 
@@ -79,7 +80,7 @@ class Concurrent(Workflow):
     trade the cost column exists to expose.
     """
 
-    name: str = "maf_concurrent"
+    name: str = "hand_rolled_concurrent"
     coalition: tuple[str, ...] = ("researcher", "critic", "verifier")
 
     def _pattern(self, last_agents: list[str], hint: str, legal: list[str]) -> Choice:
@@ -101,7 +102,7 @@ class Handoff(Workflow):
     that repeats whoever just acted falls through to the next specialist not yet used.
     """
 
-    name: str = "maf_handoff"
+    name: str = "hand_rolled_handoff"
     _seen: list[str] = field(default_factory=list)
 
     def _pattern(self, last_agents: list[str], hint: str, legal: list[str]) -> Choice:
@@ -120,13 +121,19 @@ class Handoff(Workflow):
 
 
 WORKFLOWS: dict[str, type[Workflow]] = {
-    "maf_sequential": Sequential,
+    "hand_rolled_sequential": Sequential,
+    "hand_rolled_concurrent": Concurrent,
+    "hand_rolled_handoff": Handoff,
+    # Not yet ported to real framework edges, so they still say what they are.
     "maf_concurrent": Concurrent,
     "maf_handoff": Handoff,
 }
 
 
-def build_workflow(arm: str) -> Workflow | None:
+def build_workflow(arm: str):
     """Return the workflow for an arm, or None when the arena's own policy is driving."""
+    graph = GRAPHS.get(arm)
+    if graph is not None:
+        return GraphWorkflow(arm, graph())
     factory = WORKFLOWS.get(arm)
     return factory() if factory else None

@@ -3,6 +3,23 @@ title: Markov Agent Orchestrator
 description: An experiment harness that answers whether multi-agent orchestration beats a single agent on your task, with a pixel-art arena that shows the decisions being made and paid for.
 ---
 
+<div align="center">
+
+<img src="frontend/public/sprites/generalist.png" width="68" alt="Generalist" />
+<img src="frontend/public/sprites/orchestrator.png" width="68" alt="Orchestrator" />
+<img src="frontend/public/sprites/planner.png" width="68" alt="Planner" />
+<img src="frontend/public/sprites/researcher.png" width="68" alt="Researcher" />
+<img src="frontend/public/sprites/critic.png" width="68" alt="Critic" />
+<img src="frontend/public/sprites/verifier.png" width="68" alt="Verifier" />
+<img src="frontend/public/sprites/memory.png" width="68" alt="Memory" />
+<img src="frontend/public/sprites/executor.png" width="68" alt="Executor" />
+
+**Is your multi-agent setup actually better than one agent?**
+
+Measure it against a single-agent control on the same seeds, with a blind judge.
+
+</div>
+
 ## What this is
 
 Most multi-agent frameworks assume the answer. They hard-code a workflow — planner, then researcher, then critic — and never ask whether any of it beat one agent doing the work alone.
@@ -90,6 +107,11 @@ A **strategy** is a policy plus the configuration that makes it a coherent appro
 | `learned_mdp` | learned | Q-learning with a linear approximator |
 | `learned_markov_game` | learned | Per-player values plus learned synergy |
 | `learned_marl` | learned | VDN mixing with difference rewards |
+| `maf_sequential` | immediately | A real Agent Framework workflow: chained specialists on a cycle edge |
+| `maf_concurrent` | immediately | Fan-out to three specialists at once. Hand-rolled, not yet ported |
+| `maf_handoff` | immediately | Each agent names the next. Hand-rolled, not yet ported |
+
+Only `maf_sequential` runs on actual `WorkflowBuilder` edges. The other two approximate their patterns in about a hundred lines, so they are labelled as approximations until they are ported, and a run of `maf_concurrent` records its driver as `hand_rolled_concurrent` rather than claiming otherwise.
 
 `GET /api/meta` returns the catalog; `POST /api/runs` accepts a `strategy` id and derives the policy, its options and the arm name.
 
@@ -177,6 +199,29 @@ The only other outbound calls belong to the research providers, and all of them 
 ## Running an experiment
 
 An experiment is a set of runs sharing an `experiment` name, split into `arm`s, on the **same seeds**. One arm must be called `control`.
+
+There are three ways to drive one, in increasing order of how much they do for you.
+
+| Entry point | What it does |
+| --- | --- |
+| `cli/bin/arena.js` | `arena run` drives a paired experiment from the terminal, in the arena's colours |
+| `bridge/run.py` | Every arm on every seed through Microsoft Agent Framework, then blind pairwise judging |
+| `scripts/run-experiment.ps1` | The same shape using separate Copilot CLI sessions, billed in AIU |
+
+```powershell
+# Microsoft Agent Framework, five seeds, judged blind
+C:\venvs\arena-maf\Scripts\python bridge/run.py `
+  --experiment ci-debt `
+  --task "our CI suite takes 45 minutes" `
+  --hypothesis "shard it" --hypothesis "split pre/post merge" `
+  --hypothesis "fix test design" --hypothesis "merge queue" `
+  --rubric-file bridge/rubrics/actionable.md `
+  --seeds 101 102 103 104 105
+```
+
+All three keep the driver, the arms and the judge in separate sessions. A driver that reasons about the task is an unmeasured third arm, and a judge that knows the labels is not blind.
+
+Driving the REST API directly works too, and shows the shape the others automate:
 
 ```powershell
 # same seed, one arm per strategy
@@ -283,22 +328,31 @@ backend/
   app/research/        Provider abstraction + arXiv / Semantic Scholar / PwC / HITS MCP
   app/api/             REST + WebSocket routers
   app/services/        Run lifecycle, experiments, spectator hub
-  tools/               balance.py (single-episode policy probe)
-  tests/               118 tests
+  tools/               balance.py (policy probe across seeds)
+  tests/               135 tests
+bridge/
+  arena_bridge/        Agent Framework driver, executor, blind judge, workflow graphs
+  rubrics/             Judging rubrics, written before the runs
+  run.py               Full experiment: every arm on every seed, then pairwise judging
+  compare_routing.py   Checks a ported graph routes like its hand-rolled reference
+cli/
+  bin/arena.js         `arena run`, a paired experiment from the terminal
+  lib/                 API client and the arena's own colour palette
 frontend/
   app/                 Title screen, arena, compare, research library
   components/game/     Arena, HUD, Controls, GraphView, RewardDashboard, TraceExplorer
   components/pixel/    Sprite renderer with animation playback
+  public/sprites/      98 generated PNGs plus manifest
 docs/                  Architecture, ResearchRoadmap, DesignDecisionLog
 research/              Curated offline corpus
-scripts/               dev.ps1, fetch-sprites.ps1
+scripts/               dev.ps1, fetch-sprites.ps1, run-experiment.ps1
 ```
 
 ## Testing and measurement
 
 ```powershell
 cd backend
-python -m pytest -q                                  # 118 tests
+python -m pytest -q                                  # 135 tests
 python -m tools.balance --episodes 40                # policy behaviour across seeds
 ```
 
@@ -317,12 +371,12 @@ Every test here checks *mechanics* — that snapshots round-trip, that a stale p
 | `POST /api/runs/{id}/step` | Advance a simulated run |
 | `POST /api/runs/{id}/live/open` | Ask the policy who acts next; does not advance |
 | `POST /api/runs/{id}/live/report` | Fold in real agent output and advance |
+| `POST /api/runs/{id}/live/abandon` | Release an opened step that was never reported |
 | `POST /api/runs/{id}/verdict` | Record judged answer quality |
 | `POST /api/experiments/{name}/pairwise` | Record a blind head-to-head preference |
 | `GET /api/meta/strategies/{id}/papers` | The published work a strategy implements |
 | `GET /api/experiments` | List experiments and their arms |
 | `GET /api/experiments/{name}` | Paired comparison, verdict and caveats |
-
 | `WS /ws/runs/{id}` | Live step stream for spectators |
 
 ## Art
@@ -331,10 +385,27 @@ Sprites were generated with [PixelLab](https://www.pixellab.ai) via its MCP serv
 
 Eight characters: the **generalist** who works solo before escalation, six specialists who appear only once orchestration is bought, and the orchestrator that replaces the generalist at the centre when it does. That transition is the clearest picture of what this repository measures — you can see the moment the extra agents get paid for.
 
+<table>
+  <tr>
+    <td align="center"><img src="frontend/public/sprites/generalist.png" width="64" alt="Generalist" /><br /><sub><b>Generalist</b><br />solo, pre-escalation</sub></td>
+    <td align="center"><img src="frontend/public/sprites/orchestrator.png" width="64" alt="Orchestrator" /><br /><sub><b>Orchestrator</b><br />takes the centre</sub></td>
+    <td align="center"><img src="frontend/public/sprites/planner.png" width="64" alt="Planner" /><br /><sub><b>Planner</b><br />decomposes</sub></td>
+    <td align="center"><img src="frontend/public/sprites/researcher.png" width="64" alt="Researcher" /><br /><sub><b>Research</b><br />gathers evidence</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="frontend/public/sprites/critic.png" width="64" alt="Critic" /><br /><sub><b>Critic</b><br />reopens hypotheses</sub></td>
+    <td align="center"><img src="frontend/public/sprites/verifier.png" width="64" alt="Verifier" /><br /><sub><b>Verification</b><br />disputes claims</sub></td>
+    <td align="center"><img src="frontend/public/sprites/memory.png" width="64" alt="Memory" /><br /><sub><b>Memory</b><br />retrieves context</sub></td>
+    <td align="center"><img src="frontend/public/sprites/executor.png" width="64" alt="Executor" /><br /><sub><b>Executor</b><br />produces artifacts</sub></td>
+  </tr>
+</table>
+
+Each character also ships directional frames plus idle and attack animations, which is what the arena plays when an agent is selected for a step.
+
 The roster is styled after a corporate-hacker-noir aesthetic using original archetypes rather than any protected character designs.
 
 ## Documentation
 
 * [docs/Architecture.md](docs/Architecture.md) — decision formalism, transition kernel, reward decomposition, persistence
 * [docs/ResearchRoadmap.md](docs/ResearchRoadmap.md) — the staged path and what each stage removes
-* [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md) — 13 decisions with rejected alternatives and accepted costs
+* [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md) — 22 decisions with rejected alternatives and accepted costs

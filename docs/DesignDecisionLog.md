@@ -262,3 +262,23 @@ Both cost differences are around ten standard errors, and the paired step delta 
 The claim this supports is narrow. One task, one model, one judge, five seeds, and a 5-of-5 sweep clears `|p - 0.5| > 1/sqrt(n)` by 0.053. It is evidence that on this task, concurrent fan-out cost three times as much and produced answers a blind judge preferred less, every time. It is not evidence about orchestration in general, and the handoff arm's 2-of-5 is not evidence of anything at all.
 
 A caveat that no longer fires is worth recording too. Earlier attempts at this experiment lost the control arm on two seeds to the replay guard, because a solo agent given eight steps ran out of new material and restated itself. Those runs were shorter, and shorter runs are cheaper, which biased the cost comparison toward the conclusion being tested. The runs were deleted rather than caveated, and the driver now reports a repetition as a `failure` outcome so the arm continues and the stall is counted.
+
+## DDL-023: put the framework arms on the framework
+
+The arms named `maf_sequential`, `maf_concurrent` and `maf_handoff` contained no Microsoft Agent Framework. `workflows.py` reimplemented sequential, concurrent and handoff routing as about a hundred lines of dataclasses returning a `Choice`, and its own docstring claimed that "what gets compared is the framework's pattern rather than a wrapper around it". That claim was not true. The arms measured our approximation of three published patterns, which is a different quantity with the same name.
+
+The reason it was written that way was a real constraint. A `WorkflowBuilder` graph owns its control flow, and the arena has to interpose on every step to enforce the escalation gate, check legality, sample the transition and charge budget. Those two facts look incompatible.
+
+They are not. Agent Framework 1.14.0 already has the interposition primitive:
+
+* `WorkflowContext.request_info(data, response_type)` suspends the graph and asks the outside
+* `Workflow.run(responses={request_id: value})` answers and resumes it
+* `WorkflowRunResult.get_request_info_events()` surfaces what it is waiting on
+
+So a workflow can propose and the arena can dispose, which is exactly the division of authority the arena needs. `maf_sequential` now runs on real `WorkflowBuilder` edges: a `Gate` executor holds the solo-then-escalate opening, `add_chain` lays down plan, research, critique, verify, and an edge from the last node back to the first turns the chain into a cycle so one graph covers a run of any length. Acting means calling `request_info`, so a node physically cannot act without the arena approving first.
+
+The hand-rolled versions were kept rather than deleted, renamed `hand_rolled_*`, because they are the control for the port. `bridge/compare_routing.py` drives both against an identical scripted arena and compares action sequences; they agree on the ten-step routing trace and on the termination path when no chain specialist is legal. Swapping an unverified claim for an unverified rewrite would not have been an improvement.
+
+`maf_concurrent` and `maf_handoff` are not ported yet, so they are labelled approximations in the catalog and have lost the `external_driver` attribution. They still resolve to the hand-rolled classes, and `ArmResult.driver` records `hand_rolled_concurrent` for a run of `maf_concurrent`, so the results file shows the gap rather than hiding it.
+
+That has a consequence for DDL-022. The measured numbers there were produced by the hand-rolled implementations, so they describe those patterns as we wrote them, not as the framework implements them. The finding stands on its own terms and the cost multiples are real, but it is not a measurement of Microsoft Agent Framework and should not be cited as one.
