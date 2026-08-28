@@ -160,6 +160,7 @@ async def drive_arm(
                 new_tokens=invocation.new_tokens,
                 cached_tokens=invocation.cached_tokens,
                 summary=invocation.summary,
+                next_agent=invocation.next_agent,
                 parsed=invocation.parsed,
             )
         reports = [pool.to_report(inv) for inv in invocations]
@@ -184,8 +185,11 @@ async def drive_arm(
         legal = list(reported["run"]["preview"]["legal_actions"])
         steps += 1
         last_agents = agent_ids
-        handoff_hint = " ".join(inv.next_agent for inv in invocations if inv.next_agent)
         if invocations:
+            # `escalate` produces no invocations. Recomputing the hint there would discard the
+            # nomination the previous agent made, so the handoff pattern would always fall back
+            # to declaration order on its first specialist step.
+            handoff_hint = " ".join(inv.next_agent for inv in invocations if inv.next_agent)
             last_texts = [inv.text for inv in invocations if inv.text]
 
         emit(
