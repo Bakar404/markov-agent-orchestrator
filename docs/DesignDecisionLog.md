@@ -291,6 +291,8 @@ The hand-rolled versions were kept rather than deleted, renamed `hand_rolled_*`,
 
 That has a consequence for DDL-022. The measured numbers there were produced by the hand-rolled implementations, so they describe those patterns as we wrote them, not as the framework implements them. The routing is now known to be identical, so the comparison is not invalidated, but the run predates the port and should be described as what it was.
 
+Those runs are stored under the experiment name `coord-cost`. Adding new runs to that name would mix two implementations under one label with nothing in the data to separate them, so it is better treated as a closed record: re-run under a fresh name rather than topping it up.
+
 ## DDL-024: stop handing prompts to a shell
 
 The CLI spawned Copilot with `shell: true`, which on Windows routes the argument list through `cmd.exe`. Node concatenates those arguments without escaping them, and `cmd.exe` then interprets its own metacharacters. A prompt is not a safe thing to put through that. Ours carry the task text, the hypotheses, and for the judge the entire text of both answers, which is model output and therefore arbitrary.
