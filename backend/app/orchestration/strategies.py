@@ -141,8 +141,8 @@ STRATEGIES: tuple[Strategy, ...] = (
         label="MAF Sequential Workflow",
         policy="external",
         summary=(
-            "Microsoft Agent Framework drives a fixed chain: plan, research, critique, verify. "
-            "One specialist per step, each seeing what came before."
+            "A Microsoft Agent Framework workflow drives a fixed chain: plan, research, "
+            "critique, verify. Real WorkflowBuilder edges, with a cycle edge closing the loop."
         ),
         when=(
             "The baseline shape of most agent frameworks. Compare it against the control "
@@ -155,11 +155,11 @@ STRATEGIES: tuple[Strategy, ...] = (
     ),
     Strategy(
         id="maf_concurrent",
-        label="MAF Concurrent Workflow",
+        label="Concurrent Workflow (approximation)",
         policy="external",
         summary=(
-            "Microsoft Agent Framework fans out to researcher, critic and verifier at once, "
-            "then folds their answers together."
+            "Fans out to researcher, critic and verifier at once, then folds their answers "
+            "together. Hand-rolled: not yet ported to framework edge groups."
         ),
         when=(
             "When the subtasks are genuinely independent. Buys wall-clock time and pays for "
@@ -168,15 +168,14 @@ STRATEGIES: tuple[Strategy, ...] = (
         category="Agent Orchestration",
         paper_query="concurrent multi agent fan out aggregation",
         escalates="always",
-        external_driver="microsoft-agent-framework",
     ),
     Strategy(
         id="maf_handoff",
-        label="MAF Handoff Workflow",
+        label="Handoff Workflow (approximation)",
         policy="external",
         summary=(
             "Each agent names who should act next, so the route through the team is chosen "
-            "by the agents rather than by a policy or a fixed order."
+            "by the agents. Hand-rolled: not yet ported to framework edge groups."
         ),
         when=(
             "When the right specialist depends on what the last one found. The most "
@@ -185,7 +184,6 @@ STRATEGIES: tuple[Strategy, ...] = (
         category="Agent Routing",
         paper_query="agent handoff delegation routing language model",
         escalates="always",
-        external_driver="microsoft-agent-framework",
     ),
 )
 

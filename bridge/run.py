@@ -83,8 +83,10 @@ async def main() -> int:
         default=None,
         help=(
             "Repeatable. 'control' is mandatory. The arena's own arms are cascade and "
-            "always_orchestrate; maf_sequential, maf_concurrent and maf_handoff are driven by "
-            "Microsoft Agent Framework patterns instead. Defaults to control and cascade."
+            "always_orchestrate. maf_sequential runs on a real Agent Framework workflow; "
+            "maf_concurrent and maf_handoff are still hand-rolled approximations, and "
+            "hand_rolled_sequential is kept as the reference for the ported one. "
+            "Defaults to control and cascade."
         ),
     )
     parser.add_argument("--max-steps", type=int, default=8)
