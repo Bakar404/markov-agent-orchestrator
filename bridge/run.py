@@ -46,6 +46,10 @@ def log(kind: str, payload: dict) -> None:
         say(f"{head} step {payload['step']} {payload['action']} -> {', '.join(payload['agents'])}")
     elif kind == "agent_done":
         flag = "" if payload["parsed"] else "  [no verdict block]"
+        # Whether a nomination was actually made is the difference between agent-directed
+        # routing and a fixed rotation that happens to look like one.
+        nominated = payload.get("next_agent") or ""
+        flag += f"  -> {nominated}" if nominated else ""
         say(
             f"{head}   {payload['agent']:<12} {payload['model']:<18} "
             f"{payload['outcome']:<8} conf {payload['confidence']:.2f}  "
