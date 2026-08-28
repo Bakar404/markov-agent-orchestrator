@@ -155,11 +155,11 @@ STRATEGIES: tuple[Strategy, ...] = (
     ),
     Strategy(
         id="maf_concurrent",
-        label="Concurrent Workflow (approximation)",
+        label="MAF Concurrent Workflow",
         policy="external",
         summary=(
-            "Fans out to researcher, critic and verifier at once, then folds their answers "
-            "together. Hand-rolled: not yet ported to framework edge groups."
+            "A Microsoft Agent Framework workflow fans out to researcher, critic and verifier "
+            "at once and fans back in. Real edge groups decide the coalition."
         ),
         when=(
             "When the subtasks are genuinely independent. Buys wall-clock time and pays for "
@@ -168,14 +168,15 @@ STRATEGIES: tuple[Strategy, ...] = (
         category="Agent Orchestration",
         paper_query="concurrent multi agent fan out aggregation",
         escalates="always",
+        external_driver="microsoft-agent-framework",
     ),
     Strategy(
         id="maf_handoff",
-        label="Handoff Workflow (approximation)",
+        label="MAF Handoff Workflow",
         policy="external",
         summary=(
-            "Each agent names who should act next, so the route through the team is chosen "
-            "by the agents. Hand-rolled: not yet ported to framework edge groups."
+            "Each agent names who should act next and a Microsoft Agent Framework "
+            "switch-case edge group dispatches on the nomination."
         ),
         when=(
             "When the right specialist depends on what the last one found. The most "
@@ -184,6 +185,7 @@ STRATEGIES: tuple[Strategy, ...] = (
         category="Agent Routing",
         paper_query="agent handoff delegation routing language model",
         escalates="always",
+        external_driver="microsoft-agent-framework",
     ),
 )
 
