@@ -243,7 +243,10 @@ copilot
                 </span>
                 {external ? (
                   <span className="mt-1 block font-mono text-3xs leading-relaxed text-amber">
-                    Driven by {option.external_driver} — run it from bridge/run.py
+                    Routed by {option.external_driver}, which this page cannot drive.
+                    <span className="mt-0.5 block text-muted">
+                      python bridge/run.py --arm {option.id}
+                    </span>
                   </span>
                 ) : null}
                 {selected && !external ? (

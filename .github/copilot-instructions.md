@@ -11,6 +11,8 @@ frontend renders them.
 
 * Backend: `backend/` — FastAPI, SQLAlchemy, SQLite. Runs on `http://localhost:8000`.
 * Frontend: `frontend/` — Next.js 14. Runs on `http://localhost:3000`.
+* CLI: `cli/` — `arena run`, a paired experiment driven from the terminal.
+* Bridge: `bridge/` — Agent Framework workflows, for the arms the arena does not route itself.
 * Tests: `cd backend; python -m pytest tests/ -q`
 * Start both: `.\scripts\dev.ps1`
 
@@ -177,9 +179,38 @@ experiment. `cascade` escalates when the solo attempt stalls. `always_orchestrat
 immediately. The four learned strategies currently escalate 100% of the time, so they add cost
 without adding a distinct behaviour — prefer `cascade` unless the user asks for them.
 
+**You cannot drive an arm whose `external_driver` is set.** `maf_sequential`, `maf_concurrent`
+and `maf_handoff` are routed by a Microsoft Agent Framework workflow that decides who acts, so
+`live/open` refuses to pick an agent and tells the caller to declare one. Creating such a run
+from here produces a run nothing can step. If the user asks for one, do not create it — point
+them at the driver that can:
+
+```powershell
+C:\venvs\arena-maf\Scripts\python bridge/run.py --experiment <name> --arm control --arm maf_sequential `
+    --task "<task>" --hypothesis "<h0>" --hypothesis "<h1>" --hypothesis "<h2>" --hypothesis "<h3>" `
+    --rubric-file <rubric.md> --seeds 101 102 103 104 105
+```
+
+Check `external_driver` in the catalog rather than matching on the `maf_` prefix, so a strategy
+added later is handled correctly without this file being updated.
+
+### The other two entry points
+
+The protocol above is for driving the arena yourself, turn by turn, which is the right shape
+when the user wants to watch it happen. Two alternatives exist and are better for a full
+experiment:
+
+* `cli/bin/arena.js` — `arena run` drives both arms and judges them blind, spawning a fresh
+  Copilot session per agent. It refuses externally driven arms up front rather than mid-run.
+* `bridge/run.py` — every arm on every seed through Agent Framework, then blind pairwise
+  judging. The only way to run the `maf_*` arms.
+
 ### Errors
 
 * `409` on report — no step is open, or the token is stale. Call `live/open` again.
 * `422` on report — the agent set does not match the open step. Report exactly the agents listed.
 * `409` on open — the run terminated, or it is a sim run.
+* `409` on open saying the run is externally driven — the arm belongs to `bridge/run.py`, not to
+  this protocol. Do not try to satisfy it by declaring an action yourself; that would make you
+  the orchestrator being measured.
 * `paired_seeds: 0` in the comparison — the arms ran different seeds. Re-run them on one seed.
