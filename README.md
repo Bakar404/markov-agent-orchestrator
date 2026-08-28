@@ -107,11 +107,11 @@ A **strategy** is a policy plus the configuration that makes it a coherent appro
 | `learned_mdp` | learned | Q-learning with a linear approximator |
 | `learned_markov_game` | learned | Per-player values plus learned synergy |
 | `learned_marl` | learned | VDN mixing with difference rewards |
-| `maf_sequential` | immediately | A real Agent Framework workflow: chained specialists on a cycle edge |
-| `maf_concurrent` | immediately | Fan-out to three specialists at once. Hand-rolled, not yet ported |
-| `maf_handoff` | immediately | Each agent names the next. Hand-rolled, not yet ported |
+| `maf_sequential` | immediately | A chain of specialists on a cycle edge |
+| `maf_concurrent` | immediately | Fan-out to three specialists at once, then fan back in |
+| `maf_handoff` | immediately | Each agent names the next, dispatched by switch-case |
 
-Only `maf_sequential` runs on actual `WorkflowBuilder` edges. The other two approximate their patterns in about a hundred lines, so they are labelled as approximations until they are ported, and a run of `maf_concurrent` records its driver as `hand_rolled_concurrent` rather than claiming otherwise.
+The three `maf_*` arms run on actual Microsoft Agent Framework graphs: `add_chain`, `add_fan_out_edges` with `add_fan_in_edges`, and `add_switch_case_edge_group` respectively. A node cannot act on its own, because acting means suspending on `request_info` until the arena has approved the action and charged for it. `hand_rolled_*` versions of all three are kept as the reference the ports are checked against.
 
 `GET /api/meta` returns the catalog; `POST /api/runs` accepts a `strategy` id and derives the policy, its options and the arm name.
 

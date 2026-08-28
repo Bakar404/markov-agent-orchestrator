@@ -275,10 +275,18 @@ They are not. Agent Framework 1.14.0 already has the interposition primitive:
 * `Workflow.run(responses={request_id: value})` answers and resumes it
 * `WorkflowRunResult.get_request_info_events()` surfaces what it is waiting on
 
-So a workflow can propose and the arena can dispose, which is exactly the division of authority the arena needs. `maf_sequential` now runs on real `WorkflowBuilder` edges: a `Gate` executor holds the solo-then-escalate opening, `add_chain` lays down plan, research, critique, verify, and an edge from the last node back to the first turns the chain into a cycle so one graph covers a run of any length. Acting means calling `request_info`, so a node physically cannot act without the arena approving first.
+So a workflow can propose and the arena can dispose, which is exactly the division of authority the arena needs. All three arms now run on real graphs, and each uses the edge construct its pattern is actually about:
 
-The hand-rolled versions were kept rather than deleted, renamed `hand_rolled_*`, because they are the control for the port. `bridge/compare_routing.py` drives both against an identical scripted arena and compares action sequences; they agree on the ten-step routing trace and on the termination path when no chain specialist is legal. Swapping an unverified claim for an unverified rewrite would not have been an improvement.
+| arm | framework construct | shape |
+| --- | --- | --- |
+| `maf_sequential` | `add_chain` plus a closing edge | plan, research, critique, verify, on a cycle |
+| `maf_concurrent` | `add_fan_out_edges` and `add_fan_in_edges` | three branches, folded into one priced step |
+| `maf_handoff` | `add_switch_case_edge_group` | a nomination dispatched by the routing table |
 
-`maf_concurrent` and `maf_handoff` are not ported yet, so they are labelled approximations in the catalog and have lost the `external_driver` attribution. They still resolve to the hand-rolled classes, and `ArmResult.driver` records `hand_rolled_concurrent` for a run of `maf_concurrent`, so the results file shows the gap rather than hiding it.
+A `Gate` executor holds the solo-then-escalate opening in every graph, so specialists are still earned rather than assumed. Acting means calling `request_info`, so a node physically cannot act without the arena approving first.
 
-That has a consequence for DDL-022. The measured numbers there were produced by the hand-rolled implementations, so they describe those patterns as we wrote them, not as the framework implements them. The finding stands on its own terms and the cost multiples are real, but it is not a measurement of Microsoft Agent Framework and should not be cited as one.
+The concurrent graph is the one where the port changes something real. The coalition used to be a tuple in a policy; it is now which branches the fan-out reaches, so the membership is the graph's shape. The fan-in sorts branches back into graph order before proposing, because fan-in makes no ordering promise and the coalition is part of what is being compared.
+
+The hand-rolled versions were kept rather than deleted, renamed `hand_rolled_*`, because they are the control for the port. `bridge/compare_routing.py` drives both halves of each pair against an identical scripted arena and compares action sequences across seven scenarios: a full roster, a roster with nothing the pattern wants, and a concurrent arm with no budget to fan out. All seven agree. Swapping an unverified claim for an unverified rewrite would not have been an improvement.
+
+That has a consequence for DDL-022. The measured numbers there were produced by the hand-rolled implementations, so they describe those patterns as we wrote them, not as the framework implements them. The routing is now known to be identical, so the comparison is not invalidated, but the run predates the port and should be described as what it was.

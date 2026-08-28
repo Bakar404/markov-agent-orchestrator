@@ -124,9 +124,6 @@ WORKFLOWS: dict[str, type[Workflow]] = {
     "hand_rolled_sequential": Sequential,
     "hand_rolled_concurrent": Concurrent,
     "hand_rolled_handoff": Handoff,
-    # Not yet ported to real framework edges, so they still say what they are.
-    "maf_concurrent": Concurrent,
-    "maf_handoff": Handoff,
 }
 
 
