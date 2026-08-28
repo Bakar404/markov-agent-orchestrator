@@ -7,7 +7,7 @@
  * unmeasured third arm.
  */
 
-import { Api, invokeChild } from "../lib/client.js";
+import { Api, copilotVersion, invokeChild } from "../lib/client.js";
 import { AGENT_COLOR, bad, banner, c, ok, panel, roster, rule, warn, wrapText } from "../lib/ui.js";
 
 const RUBRIC =
@@ -196,12 +196,51 @@ REASON: <one sentence>`;
   console.log(`  ${c.dim(`seed ${seed}`)}  ${label}  ${c.dim(reason.slice(0, 88))}`);
 }
 
+/**
+ * Everything that can be known to be wrong before a single token is spent.
+ *
+ * Creating runs first and discovering the problem on the opening brief leaves abandoned rows in
+ * the database and a partial experiment that cannot be compared, so each check happens here.
+ */
+async function preflight(api, opts) {
+  let meta;
+  try {
+    meta = await api.meta();
+  } catch {
+    return `Backend unreachable at ${opts.api}. Start it with .\\scripts\\dev.ps1`;
+  }
+
+  const catalog = meta.strategies ?? [];
+  const chosen = catalog.find((s) => s.id === opts.treatmentArm);
+  if (!chosen) {
+    const ids = catalog.map((s) => s.id).join(", ");
+    return `unknown arm '${opts.treatmentArm}'. Available: ${ids}`;
+  }
+  if (chosen.is_control) {
+    return "the treatment arm cannot be the control; the run already includes control";
+  }
+  if (chosen.external_driver) {
+    // This CLI drives agents through Copilot. Those arms are routed by an Agent Framework
+    // graph in Python, which this process has no way to run.
+    return (
+      `'${chosen.id}' is routed by ${chosen.external_driver}, which this CLI cannot drive.\n` +
+      `  Run it with:  C:\\venvs\\arena-maf\\Scripts\\python bridge/run.py --arm ${chosen.id}`
+    );
+  }
+
+  try {
+    opts.copilot = await copilotVersion();
+  } catch (err) {
+    return `${err.message}. Every agent turn and the judge shell out to it.`;
+  }
+  return null;
+}
+
 export async function run(opts) {
   const api = new Api(opts.api);
-  try {
-    await api.meta();
-  } catch {
-    console.error(bad(`Backend unreachable at ${opts.api}. Start it with .\\scripts\\dev.ps1`));
+  const problem = await preflight(api, opts);
+  if (problem) {
+    console.error(bad(problem));
     process.exitCode = 1;
     return;
   }
@@ -218,6 +257,8 @@ export async function run(opts) {
       `${c.cyan("control")}       ${c.mist(opts.orchestratorModel || "default")} ${c.dim("solo")}`,
       `${c.magenta("orchestrated")}  ${c.mist(opts.orchestratorModel || "default")} ${c.dim("+ workers on")} ${c.mist(opts.workerModel || "default")}`,
       `${c.violet("judge")}         ${c.mist(opts.judgeModel || "default")} ${c.dim("blind, order shuffled")}`,
+      "",
+      `${c.dim("driver")}    ${c.mist(opts.copilot ?? "copilot")}`,
     ]),
   );
 

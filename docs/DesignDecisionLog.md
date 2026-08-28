@@ -290,3 +290,20 @@ The concurrent graph is the one where the port changes something real. The coali
 The hand-rolled versions were kept rather than deleted, renamed `hand_rolled_*`, because they are the control for the port. `bridge/compare_routing.py` drives both halves of each pair against an identical scripted arena and compares action sequences across seven scenarios: a full roster, a roster with nothing the pattern wants, and a concurrent arm with no budget to fan out. All seven agree. Swapping an unverified claim for an unverified rewrite would not have been an improvement.
 
 That has a consequence for DDL-022. The measured numbers there were produced by the hand-rolled implementations, so they describe those patterns as we wrote them, not as the framework implements them. The routing is now known to be identical, so the comparison is not invalidated, but the run predates the port and should be described as what it was.
+
+## DDL-024: stop handing prompts to a shell
+
+The CLI spawned Copilot with `shell: true`, which on Windows routes the argument list through `cmd.exe`. Node concatenates those arguments without escaping them, and `cmd.exe` then interprets its own metacharacters. A prompt is not a safe thing to put through that. Ours carry the task text, the hypotheses, and for the judge the entire text of both answers, which is model output and therefore arbitrary.
+
+A stand-in script that echoes its arguments was given the string `p99 & calc.exe | echo pwned > owned.txt ; "quoted" $(sub) ...`. Under `shell: true` the receiving process saw `p99`, the rest was interpreted as commands, and `owned.txt` was created on disk. Under `shell: false` the string arrived whole.
+
+Two separate problems sit in that result, and the quieter one matters more here:
+
+* Anything after an unquoted `&` is executed. Model output routinely contains shell metacharacters, so this is reachable without an attacker.
+* Anything after an unquoted `&` is also **removed from the prompt**. A judge asked to compare two answers would have silently graded a fragment of one, and the run would have looked entirely normal. Every number downstream of that would have been wrong with no error to notice.
+
+The fix is to never involve a shell. `copilot` on this machine is a PowerShell shim rather than an executable, so the CLI now resolves `copilot.exe` or `copilot.ps1` with `where.exe`, invokes PowerShell with `-File` when it finds the shim, and spawns everything with `shell: false` so Node passes the argument array through untouched. Confirmed against the real binary: a prompt containing those characters now reaches the model whole, with the instruction at the end of it obeyed.
+
+The Python bridge was never affected. It reaches Copilot through `GitHubCopilotAgent` in the SDK and starts no subprocess.
+
+While the CLI was open, its preflight moved ahead of run creation. It now rejects an unknown arm, the control used as a treatment, an arm routed by Agent Framework that this process cannot drive, and a missing `copilot` binary, all before any run exists. The previous order created runs first and failed on the opening brief, which left unusable rows behind and a partial experiment that could not be compared.
