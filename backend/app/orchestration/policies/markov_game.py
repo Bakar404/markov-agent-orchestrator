@@ -19,7 +19,7 @@ from itertools import combinations
 import numpy as np
 
 from ..actions import ACTIONS, ACTION_INDEX, AGENT_TO_ACTION, Action
-from ..agents import AGENT_IDS
+from ..agents import AGENT_IDS, SOLO_AGENT
 from ..state import OrchestratorState
 from .base import Policy
 
@@ -78,10 +78,13 @@ class CooperativeMarkovGamePolicy(Policy):
         return total
 
     def _all_coalitions(self) -> list[tuple[int, ...]]:
-        n = len(self.agent_ids)
+        # Multi-agent coalitions are specialists only, so the generalist is left out of the
+        # enumeration rather than filtered downstream. Scoring RUN_PARALLEL on a coalition the
+        # engine will not field would price the action against work that cannot happen.
+        candidates = [i for i, agent_id in enumerate(self.agent_ids) if agent_id != SOLO_AGENT]
         coalitions: list[tuple[int, ...]] = []
-        for size in range(1, min(MAX_COALITION_SIZE, n) + 1):
-            coalitions.extend(combinations(range(n), size))
+        for size in range(1, min(MAX_COALITION_SIZE, len(candidates)) + 1):
+            coalitions.extend(combinations(candidates, size))
         return coalitions
 
     def _best_multi_coalition(self, state: OrchestratorState) -> tuple[tuple[int, ...], float]:
