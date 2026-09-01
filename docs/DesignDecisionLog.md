@@ -2,7 +2,7 @@
 title: Design Decision Log
 description: Recorded architectural decisions for the Markov Agent Orchestrator, each with the context that forced it, the alternatives considered, and the consequences accepted.
 author: Markov Agent Orchestrator
-ms.date: 2026-08-20
+ms.date: 2026-09-01
 ms.topic: reference
 keywords:
   - architecture decision record
@@ -10,7 +10,7 @@ keywords:
   - markov game
   - reward shaping
   - research library
-estimated_reading_time: 14
+estimated_reading_time: 15
 ---
 
 ## Conventions
@@ -309,3 +309,50 @@ The fix is to never involve a shell. `copilot` on this machine is a PowerShell s
 The Python bridge was never affected. It reaches Copilot through `GitHubCopilotAgent` in the SDK and starts no subprocess.
 
 While the CLI was open, its preflight moved ahead of run creation. It now rejects an unknown arm, the control used as a treatment, an arm routed by Agent Framework that this process cannot drive, and a missing `copilot` binary, all before any run exists. The previous order created runs first and failed on the opening brief, which left unusable rows behind and a partial experiment that could not be compared.
+
+## DDL-025: cut the policy ladder to one learned policy and the rules that bracket it
+
+Supersedes part of DDL-014 and the second clause of DDL-017's closing paragraph.
+
+The registry carried five learned or rule-based policies arranged as a ladder: baselines, a LinUCB contextual bandit, tabular Q-learning blended with a linear approximator, a cooperative Markov game, and VDN-style multi-agent RL. Each rung was documented as removing a limitation of the one below it.
+
+Measurement over 40 episodes did not support that story. All four learned strategies escalated in 100% of episodes, so on the decision the arena exists to study they were indistinguishable from `always_orchestrate`. Three of them could not express a coalition either, which left them as the fixed pipeline reached by a more expensive route, with a learning apparatus whose output nothing could observe. An arm that reproduces another arm's behaviour is not a comparison, and offering it in the strategy menu invites experiments that spend budget to re-measure a bookend.
+
+`bandit.py`, `mdp.py` and `marl.py` are removed. `markov_game` stays and becomes `DEFAULT_POLICY`, because it is the only policy whose output is a coalition rather than an agent label, and coalition choice is a behaviour no other arm in the catalog has.
+
+Three alternatives were rejected:
+
+* Keep them and mark them unrecommended. They would still appear in `GET /api/meta` and in the arm menu, which costs a reader's attention and does not stop anyone running them.
+* Fix the bandit rather than delete it. Its regression was diagnosed, not mysterious: LinUCB's `A` matrix only accumulates, so the exploration bonus shrinks monotonically across episodes, exactly when heterogeneous tasks need more exploration. Repairing that is a bandit-exploration research project, and this repository's claim is about orchestration.
+* Delete `markov_game` too and ship only fixed rules. That would remove the one mechanism that decides fan-out width, leaving nothing between the two bookends.
+
+Four costs are accepted.
+
+DDL-014 said the carried-versus-fresh bandit finding survived as a warning printed beside the policy stack. There is no bandit in the policy stack now, so that mechanism lives only in git history, at `pre-narrowing`.
+
+DDL-017 said that choosing which worker to invoke remains a contextual bandit problem, "which is implemented". The framing still holds and the second clause no longer does. Nothing in the repository now measures that framing.
+
+The suite drops from 135 tests to 132. `test_engine.py` parameterizes over `POLICY_REGISTRY`, so three fewer policies is three fewer test instances rather than lost coverage.
+
+And `markov_game` is now the default and the headline learned arm on the strength of deleting its competitors, which is not evidence. It does not inherit theirs. The `coalition-choice` experiment gives it a paired comparison of its own against `control` and `always_orchestrate` over five shared seeds, and that experiment is entirely simulated, so it checks the mechanism rather than saying anything about real agents. What it does establish is that the arm is behaviourally distinct: it is the only one of the three that ever plays `RUN_PARALLEL`, while the fixed pipeline walks single agents in rotation and never forms a coalition at all.
+
+One boundary this decision does not move. DDL-017 rejected the stochastic game as the *framing* for what the arena measures, on the grounds that the specialists move when instructed and share the orchestrator's objective, and that rejection stands. What is kept is a coalition-valuation mechanism the Markov game literature motivated. Interface copy that describes the product as a cooperative stochastic game is describing the mechanism, and reads as a claim about the comparison, which DDL-017 says it is not.
+
+## DDL-026: enforce the coalition roster where the coalition is chosen, not only where it is defaulted
+
+Found while building the `coalition-choice` experiment for DDL-025. Four of five `learned_markov_game` runs formed coalitions, and one of them was `[verifier, generalist]`, twice.
+
+That should have been impossible. Escalation removes `INVOKE_GENERALIST` from the legal set precisely because the solo agent is what orchestration replaces, and `agents_for_action` in the transition kernel drops `SOLO_AGENT` from any coalition it assembles, with a comment saying why.
+
+The rule was in the wrong place. `agents_for_action` is the fallback. When a policy implements `preferred_coalition`, the engine takes that list verbatim, and `CooperativeMarkovGamePolicy` enumerated coalitions over the whole of `AGENT_IDS`, which includes the generalist. So the one policy whose entire purpose is choosing a coalition was the one policy the roster rule did not apply to, and the run bought orchestration and then quietly re-hired the agent it had just replaced.
+
+The fix is in both places, because they are two different defects. The engine now filters `SOLO_AGENT` out of any `preferred_coalition` and falls back to the kernel if fewer than two members survive, so the invariant holds for any policy written later. And the policy no longer enumerates the generalist at all, because scoring `RUN_PARALLEL` on a coalition the engine will not field prices the action against work that cannot happen: the bug was corrupting the value function, not only the roster.
+
+Rejected: filtering only in the engine. It would have restored the roster while leaving `RUN_PARALLEL` scored against an infeasible coalition, which is a quieter version of the same error and the harder one to notice later.
+
+The cost is that this changes behaviour, so any `markov_game` measurement taken before it is describing a different policy. Nothing published depended on it, and the `coalition-choice` runs were re-run against the fix rather than kept.
+
+The part worth carrying forward is why nobody noticed. `test_generalist_is_excluded_from_coalitions` already asserted this invariant, and it passed throughout. It ran one seed, that seed formed exactly one coalition, and that coalition happened to be `[planner, verifier]`. A test whose assertion executes once is a coin flip about whether it holds, and it reported the coin flip as a guarantee.
+
+Restoring the old behaviour in a sandbox puts a number on it. Across seeds 101 to 120 the policy forms 62 coalitions, and **16 of them contained the generalist**, spread over five separate seeds. The defect was not rare or marginal; it was one coalition in four, and a single-seed test simply never looked. The test now sweeps those twenty seeds and additionally asserts that a coalition formed at all, so the vacuous pass that hid this is itself a failure.
+
