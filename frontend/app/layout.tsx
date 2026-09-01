@@ -6,7 +6,7 @@ import { SpriteManifestProvider } from "@/components/pixel/PixelSprite";
 export const metadata: Metadata = {
   title: "MARKOV // AGENT ORCHESTRATOR",
   description:
-    "Agent orchestration modelled as a cooperative stochastic game: an escalation gate under uncertainty, sampled transitions and learned coalition synergy, rendered as a pixel-art game.",
+    "An experiment harness that measures whether orchestration beats one agent: an escalation gate decided under uncertainty, sampled transitions and learned coalition synergy, rendered as a pixel-art game.",
 };
 
 export const viewport: Viewport = {
