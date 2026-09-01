@@ -43,7 +43,7 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.version,
         description=(
-            "Agent orchestration as a cooperative stochastic game: an escalation gate under "
+            "An experiment harness for agent orchestration: an escalation gate decided under "
             "uncertainty, sampled transitions, and coalitions scored by learned synergy."
         ),
         lifespan=lifespan,
