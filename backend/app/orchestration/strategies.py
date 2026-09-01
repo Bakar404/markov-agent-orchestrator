@@ -89,52 +89,19 @@ STRATEGIES: tuple[Strategy, ...] = (
         escalates="heuristic",
     ),
     Strategy(
-        id="learned_bandit",
-        label="Contextual Bandit (LinUCB)",
-        policy="contextual_bandit",
-        summary=(
-            "Disjoint ridge model per action over the state context, with an optimism bonus. "
-            "Optimizes immediate reward only."
-        ),
-        when=(
-            "When each decision is roughly independent. Carrying its parameters between "
-            "episodes measurably hurts, so leave its profile off."
-        ),
-        category="Agent Routing",
-        paper_query="contextual bandit LinUCB exploration",
-    ),
-    Strategy(
-        id="learned_mdp",
-        label="Q-Learning (MDP)",
-        policy="mdp",
-        summary="Tabular Q-values plus a linear approximator, Boltzmann exploration.",
-        when="When the value of an action depends on what it lets you do next.",
-        category="Reinforcement Learning",
-        paper_query="temporal difference Q-learning function approximation",
-    ),
-    Strategy(
         id="learned_markov_game",
         label="Cooperative Markov Game",
         policy="markov_game",
         summary=(
-            "Per-agent values plus a learned pairwise synergy matrix, so coalition size is "
-            "chosen rather than fixed."
+            "Agents are players, not action labels. Per-player values plus a learned pairwise "
+            "synergy matrix score every coalition, so fan-out width is chosen rather than fixed."
         ),
-        when="When agents genuinely complement each other and fan-out width is the question.",
+        when=(
+            "When the question is not just which agent but how many. The only arm here that "
+            "picks its own coalition instead of being handed one."
+        ),
         category="Stochastic Games",
         paper_query="stochastic game cooperative equilibrium",
-    ),
-    Strategy(
-        id="learned_marl",
-        label="Multi-Agent RL (VDN)",
-        policy="marl",
-        summary=(
-            "Additive value decomposition with abstention baselines and difference rewards "
-            "for per-agent credit."
-        ),
-        when="When you need to know which agent actually earned the outcome.",
-        category="MARL",
-        paper_query="value decomposition networks multi agent credit assignment",
     ),
     Strategy(
         id="maf_sequential",

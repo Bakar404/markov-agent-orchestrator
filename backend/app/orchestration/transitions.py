@@ -106,7 +106,7 @@ def agents_for_action(
         return []
 
     # RUN_PARALLEL: build a coalition. Preference scores come from the policy when it exposes
-    # them (Markov game / MARL); otherwise fall back to a need-based heuristic. The generalist
+    # them (the Markov game); otherwise fall back to a need-based heuristic. The generalist
     # is excluded: it exists to work alone, and fanning out to it is what escalation replaced.
     scores = {k: v for k, v in (preference or {}).items() if k != SOLO_AGENT}
     if not scores:

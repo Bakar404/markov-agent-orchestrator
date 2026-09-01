@@ -69,7 +69,7 @@ class RunConfig:
     experiment: str | None = None
     """Groups arms of the same A/B comparison."""
     arm: str | None = None
-    """Which arm this run is, e.g. 'control' or 'marl'."""
+    """Which arm this run is, e.g. 'control' or 'cascade'."""
     policy_options: dict = field(default_factory=dict)
     """Extra keyword arguments for the policy constructor, e.g. the control's agent_id."""
     escalation_cost_usd: float = 0.03

@@ -1,15 +1,12 @@
-"""Policy registry — the four evolution stages plus baselines."""
+"""Policy registry — baselines plus the cooperative Markov game."""
 
 from __future__ import annotations
 
-from .bandit import LinUCBPolicy
 from .base import Policy, masked_softmax
 from .baselines import HeuristicPolicy, RandomPolicy
 from .external import ExternalPolicy
 from .fixed_sequence import FixedSequencePolicy
 from .markov_game import CooperativeMarkovGamePolicy
-from .marl import MultiAgentRLPolicy
-from .mdp import MDPQLearningPolicy
 from .single_agent import SingleAgentPolicy
 
 POLICY_REGISTRY: dict[str, type[Policy]] = {
@@ -18,13 +15,10 @@ POLICY_REGISTRY: dict[str, type[Policy]] = {
     ExternalPolicy.id: ExternalPolicy,
     HeuristicPolicy.id: HeuristicPolicy,
     FixedSequencePolicy.id: FixedSequencePolicy,
-    LinUCBPolicy.id: LinUCBPolicy,
-    MDPQLearningPolicy.id: MDPQLearningPolicy,
     CooperativeMarkovGamePolicy.id: CooperativeMarkovGamePolicy,
-    MultiAgentRLPolicy.id: MultiAgentRLPolicy,
 }
 
-DEFAULT_POLICY = LinUCBPolicy.id
+DEFAULT_POLICY = CooperativeMarkovGamePolicy.id
 
 
 def create_policy(policy_id: str, *, feature_dim: int, **kwargs: object) -> Policy:
@@ -63,8 +57,5 @@ __all__ = [
     "ExternalPolicy",
     "HeuristicPolicy",
     "FixedSequencePolicy",
-    "LinUCBPolicy",
-    "MDPQLearningPolicy",
     "CooperativeMarkovGamePolicy",
-    "MultiAgentRLPolicy",
 ]

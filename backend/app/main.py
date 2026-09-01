@@ -43,8 +43,8 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.version,
         description=(
-            "Stochastic multi-agent orchestration engine: contextual bandit → MDP → cooperative "
-            "Markov game → multi-agent RL, with an attached Research Intelligence Layer."
+            "Agent orchestration as a cooperative stochastic game: an escalation gate under "
+            "uncertainty, sampled transitions, and coalitions scored by learned synergy."
         ),
         lifespan=lifespan,
     )

@@ -12,7 +12,7 @@
 ``InformationGain = H(belief_before) - H(belief_after)`` in bits, taken directly from the
 transition outcome so the UI can show the same arithmetic it displays in the metrics panel.
 Every term is returned separately: the reward dashboard renders the decomposition, and the
-Markov-game / MARL policies use the per-term split for credit assignment.
+Markov-game policy uses the per-term split for credit assignment.
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ class RewardModel:
         """Split the step reward across the invoked coalition.
 
         Shares are proportional to each agent's realized evidence contribution net of its own
-        cost, which is the difference-reward signal the MARL policy learns from.
+        cost, which is the difference-reward signal the Markov game learns synergy from.
         """
         if not outcome.reports:
             return {}

@@ -120,15 +120,15 @@ def test_untagged_runs_are_excluded(client):
 
 def test_compare_groups_arms_and_reports_multiples(client):
     make_run(client, arm="control", policy="single_agent", experiment="cache-study")
-    make_run(client, arm="marl", policy="marl", experiment="cache-study")
+    make_run(client, arm="markov_game", policy="markov_game", experiment="cache-study")
 
     payload = client.get("/api/experiments/cache-study").json()
     arms = {a["arm"]: a for a in payload["arms"]}
 
-    assert set(arms) == {"control", "marl"}
+    assert set(arms) == {"control", "markov_game"}
     assert arms["control"]["vs_control"] is None
 
-    delta = arms["marl"]["vs_control"]
+    delta = arms["markov_game"]["vs_control"]
     assert delta["paired_seeds"] == 1, "both arms use seed 21, so they must pair"
     assert delta["cost_usd"]["multiple"] is not None
 
@@ -518,10 +518,10 @@ def test_a_declaration_drives_exactly_one_step(client):
 
 def test_experiment_listing_counts_arms(client):
     make_run(client, arm="control", policy="single_agent", experiment="listing")
-    make_run(client, arm="bandit", policy="contextual_bandit", experiment="listing")
+    make_run(client, arm="game", policy="markov_game", experiment="listing")
 
     entry = next(e for e in client.get("/api/experiments").json() if e["experiment"] == "listing")
-    assert entry["arms"] == ["bandit", "control"]
+    assert entry["arms"] == ["control", "game"]
     assert entry["runs"] == 2
     assert entry["has_control"] is True
 
