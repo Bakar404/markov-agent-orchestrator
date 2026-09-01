@@ -12,7 +12,7 @@ const ROSTER = ["planner", "researcher", "critic", "verifier", "memory", "execut
 const SAMPLE_TASKS = [
   "Which caching strategy fits a read-heavy API with bursty traffic",
   "Should we shard by tenant or by entity for a write-heavy multi-tenant store",
-  "Which exploration strategy suits a non-stationary orchestration MDP",
+  "Which exploration strategy suits a non-stationary orchestration problem",
   "Plan a migration from REST to gRPC for a service with 40 consumers",
 ];
 
@@ -81,14 +81,6 @@ export function TitleScreen() {
               <PixelSprite id={id} size={72} animation="idle" />
             </div>
           ))}
-        </div>
-
-        <div className="panel max-w-2xl px-6 py-4 text-center">
-          <p className="font-mono text-xs leading-relaxed text-[#a9a3e0]">
-            Most teams add agents and assume it helped. This measures it: the same task on the
-            same seed, one arm solo and one allowed to escalate, judged blind by someone who
-            never learns which arm is which.
-          </p>
         </div>
 
         <div className="flex flex-col items-center gap-3">
@@ -182,6 +174,10 @@ copilot
         <label className="stat-label" htmlFor="task">
           Objective
         </label>
+        <p className="mt-1 font-mono text-3xs text-amber">
+          Labels this run only. In simulation the trajectory comes from the seed and difficulty —
+          the text is never read by the engine. It becomes the real prompt in a live run.
+        </p>
         <textarea
           id="task"
           value={task}
