@@ -63,16 +63,54 @@ Three properties drive every design choice:
 
 ## The escalation gate
 
-A run starts solo. `ESCALATE` is the only other legal action until it fires, after which the specialists unlock. That makes "should I orchestrate at all" the first decision under uncertainty rather than an assumption.
+A run starts solo. Until escalation fires the action set is restricted to `invoke_generalist`, `escalate` and `terminate`, so "should I orchestrate at all" is the first decision under uncertainty rather than an assumption.
+
+Written as an extensive-form game, the shape is a chance move nobody observes, a decision the orchestrator makes without observing it, and another chance move that resolves what the decision was worth.
 
 ```mermaid
 flowchart TD
-    A["Step 1 — one generalist attempts the whole task"] --> B{"Escalation gate<br/>opening it costs budget"}
-    B -->|"control: never opens"| C["Stays solo for every remaining step"]
-    B -->|"orchestrated: opens once earned"| D["Roster unlocks<br/>planner · researcher · critic<br/>verifier · memory · executor"]
-    C --> E["Final answer"]
-    D --> E
+    subgraph I1 ["information set — the four are indistinguishable to the orchestrator<br/>it observes only the Dirichlet belief b, and H(b) = 2.00 bits"]
+        D1["orchestrator moves · σ(a|s)"]
+    end
+
+    subgraph I2 ["same latent h*, wider action set — the generalist is now off the tree"]
+        D2["orchestrator moves · σ(a|s)"]
+    end
+
+    R(("nature<br/>draws the latent hypothesis h*"))
+    R -.->|"1/K"| H0["h* = 0"]
+    R -.->|"1/K"| H1["h* = 1"]
+    R -.->|"1/K"| H2["h* = 2"]
+    R -.->|"1/K"| H3["h* = 3"]
+
+    H0 --> D1
+    H1 --> D1
+    H2 --> D1
+    H3 --> D1
+
+    D1 -->|"invoke_generalist"| N1(("nature<br/>samples the outcome"))
+    D1 -->|"escalate · charges budget"| G["gate opens"]
+    D1 -->|"terminate"| Z1{{"payoff<br/>subtasks still open ⇒ penalty"}}
+
+    N1 -->|"P(success | s,a)"| U1["evidence lands · ΔH negative"]
+    N1 -->|"P(partial | s,a)"| U2["belief drifts · stall + 1"]
+    N1 -->|"P(failure | s,a)"| U3["belief unmoved · stall + 1"]
+
+    U1 --> D1
+    U2 --> D1
+    U3 --> D1
+
+    G --> D2
+
+    D2 -->|"invoke_planner … invoke_memory"| N2(("nature"))
+    D2 -->|"run_parallel · coalition C maximises V(s,C)"| N2
+    D2 -->|"terminate"| Z2{{"payoff<br/>goal reached ⇒ terminal bonus"}}
+    N2 --> D2
 ```
+
+Nothing in that diagram is decoration. The mixed strategy on each decision edge is persisted as `action_distribution`, the chance edge as `transition_probability`, and the information-set entropy as `entropy_after`, which is why the **Game Tree** tab can render a finished run as the tree above rather than as an illustration of one.
+
+The root chance move is what makes escalation a decision under uncertainty instead of a scheduling choice. The orchestrator never learns `h*`; it only ever sees a belief over it, and every hypothesis in that information set is still live when it has to choose whether to buy help.
 
 Whether that gate should open is an empirical question rather than a design decision, so the repository ships the tool that answers it instead of an answer that goes stale. [backend/tools/balance.py](backend/tools/balance.py) runs every policy over identical seeds and reports reward, win rate, step count and how each episode ended.
 
@@ -82,17 +120,28 @@ python -m tools.balance --episodes 40
 
 Read the termination column first. A policy that terminates voluntarily in most episodes is not routing badly — it is declining to route at all, which is a different failure with a different cause. Include `random` in any comparison you draw from it: a learned policy that cannot beat uniform selection has not learned anything worth carrying.
 
-## The policy stack
+## The policies
 
-| Stage | Policy | Mechanism | The limitation it exposes |
-| --- | --- | --- | --- |
-| 0 | `random`, `heuristic` | Uniform / hand-tuned scoring | No learning at all |
-| 1 | `contextual_bandit` | Disjoint LinUCB over a 15-dimensional state context | Optimizes immediate reward; no credit across time |
-| 2 | `mdp` | Tabular Q-learning plus a linear approximator, Boltzmann exploration | Agents are flat action labels |
-| 3 | `markov_game` | Per-player values plus a learned pairwise synergy matrix | Cooperative case only |
-| 4 | `marl` | VDN additive mixing, abstention baselines, difference rewards | Linear function approximation |
+Six policies implement one interface: map a state to a distribution over the legal actions, then sample it. Five are fixed rules, and they exist to bracket the sixth.
 
-Stage 3 is where the framing changes: agents stop being action labels and become players. Coalition value is the sum of member values plus learned synergy, so the policy chooses **how many agents to fan out to**, rather than being told.
+| Policy | Chooses by | Role in a comparison |
+| --- | --- | --- |
+| `single_agent` | never escalating | The control. One generalist, no routing |
+| `fixed_sequence` | a hardcoded rotation | Upper bookend: always orchestrate |
+| `heuristic` | hand-tuned stall thresholds | Cheap attempt first, escalate on evidence |
+| `random` | uniform over legal actions | Sanity check. A learned policy that cannot beat it has learned nothing |
+| `external` | recording someone else's choice | An outside orchestrator decides; the arena only measures |
+| `markov_game` | learned per-player values plus synergy | The only policy that picks its own coalition |
+
+`markov_game` is the one that learns. Agents stop being action labels and become players: a coalition is worth the sum of its members plus a learned pairwise synergy term, minus a coordination cost that rises as the budget runs down.
+
+$$
+V(s, C) = \sum_{i \in C} Q_i(s) + \sum_{i < j \in C} W_{ij} - \lambda \big( |C| - 1 \big) \cdot \text{cost pressure}(s)
+$$
+
+The score for `run_parallel` is the best coalition value, so **how wide to fan out** is an output of the policy rather than an input to it. Every other arm is handed its coalition.
+
+Three further learned policies were removed: a LinUCB contextual bandit, tabular Q-learning blended with a linear approximator, and VDN-style multi-agent RL. Measurement over 40 episodes had them escalating in 100% of episodes while expressing no coalition, which is `always_orchestrate` reached by a more expensive route. [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md) records the removal as DDL-025, including the evidence it costs.
 
 ## Strategies: the arm catalog
 
@@ -103,10 +152,7 @@ A **strategy** is a policy plus the configuration that makes it a coherent appro
 | `control` | never | One generalist, no routing. Always include it |
 | `cascade` | on stall | Solo until progress stalls, then escalate |
 | `always_orchestrate` | immediately | Hardcoded specialist rotation |
-| `learned_bandit` | learned | LinUCB over the state context |
-| `learned_mdp` | learned | Q-learning with a linear approximator |
-| `learned_markov_game` | learned | Per-player values plus learned synergy |
-| `learned_marl` | learned | VDN mixing with difference rewards |
+| `learned_markov_game` | learned | Per-player values plus learned synergy, choosing its own coalition |
 | `maf_sequential` | immediately | A chain of specialists on a cycle edge |
 | `maf_concurrent` | immediately | Fan-out to three specialists at once, then fan back in |
 | `maf_handoff` | immediately | Each agent names the next, dispatched by switch-case |
@@ -142,6 +188,7 @@ Explore in simulation, confirm live. A live step costs real time and credits, so
 * **Compare** — the destination: arms side by side, paired on seeds, with standard errors and an explicit verdict sentence that refuses to overclaim.
 * **Arena** — one agent until the policy escalates, then specialists appear on the ring. Entropy rendered as fog that clears as the belief sharpens, damage-number reward popups, HP-style meters.
 * **Graph** — React Flow interaction graph where edge width is message volume and labels carry the mean probability weight.
+* **Game Tree** — the run redrawn as an extensive-form game: the mixed strategy at each decision node, nature's move and its probability, the information-set entropy, and the terminal payoff. Branches nature never sampled are shown as residual mass rather than invented.
 * **Rewards** — cumulative and per-step reward, entropy against information gain, the full reward decomposition, per-agent contribution with cost efficiency.
 * **Traces** — every step, expandable into the policy's action distribution, the reward breakdown, the state transition and the real agent output in live mode.
 * **Research Library** — 43 curated papers, 81 citation edges, a nine-category taxonomy, and live search across arXiv, Semantic Scholar, Papers With Code and an MCP tool provider.
@@ -407,5 +454,5 @@ The roster is styled after a corporate-hacker-noir aesthetic using original arch
 ## Documentation
 
 * [docs/Architecture.md](docs/Architecture.md) — decision formalism, transition kernel, reward decomposition, persistence
-* [docs/ResearchRoadmap.md](docs/ResearchRoadmap.md) — the staged path and what each stage removes
-* [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md) — 22 decisions with rejected alternatives and accepted costs
+* [docs/ResearchRoadmap.md](docs/ResearchRoadmap.md) — the game the arena implements today, and the assumptions each open direction would relax
+* [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md) — 26 decisions with rejected alternatives and accepted costs

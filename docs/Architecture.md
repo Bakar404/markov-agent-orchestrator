@@ -1,13 +1,13 @@
 ---
 title: Architecture
-description: System design of the Markov Agent Orchestrator, covering the decision formalism, stochastic transition kernel, reward decomposition, policy stack, persistence model, and research intelligence layer.
+description: System design of the Markov Agent Orchestrator, covering the decision formalism in normal and extensive form, the stochastic transition kernel, reward decomposition, policy registry, persistence model, and research intelligence layer.
 author: Markov Agent Orchestrator
-ms.date: 2026-08-28
+ms.date: 2026-09-01
 ms.topic: concept
 keywords:
   - markov decision process
   - markov game
-  - multi-agent reinforcement learning
+  - extensive form game
   - agent orchestration
   - system architecture
 estimated_reading_time: 18
@@ -36,6 +36,7 @@ flowchart LR
     subgraph Client["Next.js 14 + React Flow"]
         Arena[Arena canvas]
         Compare[Compare]
+        Tree[Game Tree]
         Rewards[Reward Dashboard]
         Traces[Trace Explorer]
         Library[Research Library]
@@ -52,7 +53,7 @@ flowchart LR
     subgraph Core["Orchestration engine"]
         Catalog[Strategy catalog]
         State[OrchestratorState]
-        Policy[Policy stack]
+        Policy[Policy registry]
         Kernel[TransitionModel]
         Reward[RewardModel]
     end
@@ -71,6 +72,7 @@ flowchart LR
 
     Arena --> Socket
     Compare --> Experiments
+    Tree --> Runs
     Rewards --> Runs
     Traces --> Runs
     Library --> Research
@@ -133,9 +135,66 @@ Ten actions, defined in [backend/app/orchestration/actions.py](../backend/app/or
 * `RUN_PARALLEL`, which dispatches a coalition of two or three agents
 * `TERMINATE`, which stops the episode and triggers the terminal reward
 
-The action space is **gated on escalation**. Before it fires, only `INVOKE_GENERALIST` and `ESCALATE` are legal, so a run cannot orchestrate without first deciding to. `min_solo_steps` requires a solo attempt before `ESCALATE` becomes available, because escalating before trying is not a decision informed by anything.
+The action space is **gated on escalation**. Before it fires the legal set is `INVOKE_GENERALIST`, `ESCALATE` and `TERMINATE`, so a run cannot orchestrate without first deciding to. `min_solo_steps` requires a solo attempt before `ESCALATE` becomes available, because escalating before trying is not a decision informed by anything, and `TERMINATE` stays behind `min_steps_before_terminate` and `_may_terminate`.
 
-After escalation the specialists unlock. `RUN_PARALLEL` still requires budget and latency headroom, and `TERMINATE` is still gated behind `min_steps_before_terminate`, because an orchestrator that stops before producing anything is not making a meaningful decision.
+After escalation the specialists unlock and `INVOKE_GENERALIST` leaves the set: the run has bought orchestration and cannot un-buy it. `RUN_PARALLEL` still requires budget and latency headroom, and `TERMINATE` is still gated, because an orchestrator that stops before producing anything is not making a meaningful decision.
+
+### The same thing in extensive form
+
+State, action set and kernel describe the game from the inside. Drawn as a tree, the gate is easier to argue about, because the tree makes visible the two things the state vector cannot: that a chance move happens before the orchestrator ever acts, and that the orchestrator cannot see its outcome.
+
+```mermaid
+flowchart TD
+    subgraph I1 ["information set · indistinguishable to the orchestrator<br/>it observes the Dirichlet belief b, never h*"]
+        D1["orchestrator · σ(a|s) over legal_actions()"]
+    end
+
+    subgraph I2 ["same h*, wider action set · the generalist is now illegal"]
+        D2["orchestrator · σ(a|s)"]
+    end
+
+    R(("nature<br/>draws h* uniformly over K hypotheses"))
+    R -.->|"1/K"| H0["h* = 0"]
+    R -.->|"1/K"| H1["h* = 1"]
+    R -.->|"1/K"| Hk["h* = K-1"]
+
+    H0 --> D1
+    H1 --> D1
+    Hk --> D1
+
+    D1 -->|"invoke_generalist"| N1(("nature<br/>TransitionModel.sample"))
+    D1 -->|"escalate · has_escalated := true"| G["gate opens"]
+    D1 -->|"terminate · if _may_terminate"| Z1{{"terminal payoff"}}
+
+    N1 -->|"success"| U1["Dirichlet update · ΔH negative"]
+    N1 -->|"partial"| U2["stall + 1"]
+    N1 -->|"failure"| U3["stall + 1"]
+
+    U1 --> D1
+    U2 --> D1
+    U3 --> D1
+
+    G --> D2
+
+    D2 -->|"six specialist invocations"| N2(("nature"))
+    D2 -->|"run_parallel · C = argmax V(s,C)"| N2
+    D2 -->|"terminate"| Z2{{"terminal payoff"}}
+    N2 --> D2
+```
+
+Three pieces of the tree are persisted rather than reconstructed, which is what lets `GameTree.tsx` render a finished run as this diagram instead of as a picture of one:
+
+| Tree element | Persisted as |
+| --- | --- |
+| Mixed strategy at a decision node | `Trace.action_distribution`, normalized over the legal set |
+| Realized branch and its probability | `Trace.action` and `Trace.action_probability` |
+| Nature's move | `Trace.transition_probability` |
+| Information-set entropy | `Trace.entropy_before` and `Trace.entropy_after` |
+| Terminal payoff | the terminal bonus term of the final `Trace.reward_breakdown` |
+
+One honesty constraint follows from the kernel. Only the branch nature actually took was sampled, so the alternatives at a chance node have no recorded probability. The view shows `1 - transition_probability` as undifferentiated residual mass rather than splitting it across invented branches, because the engine never enumerated them.
+
+The root chance move is the reason escalation is a decision under uncertainty rather than a scheduling choice. Every hypothesis in the information set is still live when the orchestrator has to choose whether to buy help, and in live mode there is no root chance move at all: no latent hypothesis exists, belief mass follows what agents claim, and the information set is over an answer nobody holds.
 
 ### Transition kernel P
 
@@ -182,26 +241,26 @@ $$
 
 The terms are quality delta, verification delta, information gain in bits, subtask progress, normalized cost, normalized latency, duplicate work, and a terminal bonus. Weights live in `RewardWeights` and are overridable by environment variable.
 
-Keeping the decomposition intact serves three consumers. The reward dashboard renders it directly. The Markov game and MARL policies use per-agent credit shares for their difference-reward signal. Anyone tuning the system can see which term dominates instead of guessing.
+Keeping the decomposition intact serves three consumers. The reward dashboard renders it directly. The Markov game policy uses per-agent credit shares to attribute coalition value to its members. Anyone tuning the system can see which term dominates instead of guessing.
 
 The terminal bonus rewards finishing well and penalizes bailing out. Choosing `TERMINATE` with most subtasks still open subtracts value, and running out of budget or latency carries its own penalty.
 
 ## Policy stack
 
-All five policies implement the same interface in [backend/app/orchestration/policies/base.py](../backend/app/orchestration/policies/base.py): map a state to a distribution over legal actions, then sample. Sampling rather than taking the argmax keeps exploration visible in the interface and makes the recorded `action_probability` the genuine probability of the branch that was taken.
+All six policies implement the same interface in [backend/app/orchestration/policies/base.py](../backend/app/orchestration/policies/base.py): map a state to a distribution over legal actions, then sample. Sampling rather than taking the argmax keeps exploration visible in the interface and makes the recorded `action_probability` the genuine probability of the branch that was taken.
 
-| Stage | Policy | Mechanism | Limitation it exposes |
-| --- | --- | --- | --- |
-| 0 | `random` | Uniform over legal actions | Control condition |
-| 0 | `heuristic` | Hand-tuned scoring over state features | No learning at all |
-| 1 | `contextual_bandit` | Disjoint LinUCB, one ridge model per action | Optimizes immediate reward; no credit across time |
-| 2 | `mdp` | Tabular Q-learning blended with a linear approximator | Treats the agent roster as a flat action set |
-| 3 | `markov_game` | Per-player values plus learned pairwise synergy over coalitions | Cooperative case only |
-| 4 | `marl` | VDN additive mixing, abstention baselines, difference rewards | Linear function approximation |
+| Policy | Mechanism | Why it is in the registry |
+| --- | --- | --- |
+| `single_agent` | Always `INVOKE_GENERALIST`, never escalates | The control every comparison is paired against |
+| `random` | Uniform over legal actions | Floor. A learned policy that cannot beat it has learned nothing |
+| `heuristic` | Hand-tuned scoring over state features, escalates on stall | Encodes the conventional wisdom a learned policy has to beat |
+| `fixed_sequence` | Escalates immediately, then a hardcoded rotation | Upper bookend on orchestration cost |
+| `external` | Records an action chosen outside the arena | Lets a framework drive without the arena claiming it decided |
+| `markov_game` | Per-player values plus learned pairwise synergy over coalitions | The only policy that learns, and the only one that sizes its own coalition |
 
-Stage 3 is where the framing changes. Agents stop being action labels and become players. Coalition value is the sum of member values plus learned pairwise synergy, minus a coordination cost that scales with budget pressure, so the policy chooses coalition size itself instead of being told when to fan out.
+`markov_game` is where the framing changes. Agents stop being action labels and become players. Coalition value is the sum of member values plus learned pairwise synergy, minus a coordination cost that scales with budget pressure, so the policy chooses coalition size itself instead of being told when to fan out.
 
-Stage 4 adds a learned abstention baseline per agent, which makes *not* invoking an agent an explicit decision with its own value rather than a silent omission.
+A contextual bandit, a tabular-plus-linear MDP policy and a VDN-style multi-agent learner were removed from the registry. DDL-025 records the measurement that motivated it and the evidence the removal costs.
 
 ## Strategy catalog
 
@@ -212,10 +271,10 @@ A policy is a mechanism. A **strategy** is a policy plus the configuration that 
 | `control` | `single_agent` | never | The baseline every comparison needs |
 | `cascade` | `heuristic` | on stall | Cheap attempt first, escalate on evidence |
 | `always_orchestrate` | `fixed_sequence` | immediately | Upper bookend on orchestration cost |
-| `learned_bandit` | `contextual_bandit` | learned | Immediate-reward routing |
-| `learned_mdp` | `mdp` | learned | Routing where actions have consequences |
 | `learned_markov_game` | `markov_game` | learned | Coalition choice as an output |
-| `learned_marl` | `marl` | learned | Per-agent credit assignment |
+| `maf_sequential` | `external` | immediately | Agent Framework chain, driven from outside |
+| `maf_concurrent` | `external` | immediately | Agent Framework fan-out and fan-in |
+| `maf_handoff` | `external` | immediately | Agent Framework switch-case dispatch |
 
 Strategies reference a taxonomy category and a search query rather than hardcoded citations, so `GET /api/meta/strategies/{id}/papers` draws from the live library and stays correct as it grows. The control returns nothing and says why: it was surfacing an orchestration paper purely through a shared routing tag, and citing that beside a single-agent baseline would misrepresent both.
 
