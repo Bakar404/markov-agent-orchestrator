@@ -104,13 +104,24 @@ def test_escalation_is_a_pure_cost_in_the_reward():
 
 
 def test_generalist_is_excluded_from_coalitions():
-    engine = build(policy="markov_game", budget_usd=20.0)
-    for _ in range(25):
-        if engine.done:
-            break
-        step = engine.step()
-        if step.action == Action.RUN_PARALLEL.value:
-            assert SOLO_AGENT not in step.agents
+    """Escalation replaces the solo agent, so RUN_PARALLEL must not put it back on the roster.
+
+    Swept across seeds, and asserting that coalitions actually formed. On its original single
+    seed this asserted once, against one coalition that happened not to contain the generalist,
+    so it kept passing while the Markov game policy fielded `[verifier, generalist]` elsewhere.
+    """
+    coalitions = 0
+    for seed in range(101, 121):
+        engine = build(policy="markov_game", seed=seed, budget_usd=20.0)
+        for _ in range(25):
+            if engine.done:
+                break
+            step = engine.step()
+            if step.action == Action.RUN_PARALLEL.value:
+                coalitions += 1
+                assert SOLO_AGENT not in step.agents, f"{step.agents} re-hired the solo agent"
+
+    assert coalitions > 0, "no coalition formed, so the exclusion was never exercised"
 
 
 # ------------------------------------------------------------------- baselines

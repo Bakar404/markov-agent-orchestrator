@@ -322,7 +322,13 @@ class OrchestrationEngine:
         elif action is Action.ESCALATE:
             agent_ids = []
         elif action is Action.RUN_PARALLEL:
-            agent_ids = self.policy.preferred_coalition(prev_state) or agents_for_action(
+            # A coalition is specialists only. `agents_for_action` already drops the generalist,
+            # but a policy that scores it into its best coalition would otherwise bypass that
+            # and re-hire the agent escalation just replaced.
+            preferred = [
+                a for a in (self.policy.preferred_coalition(prev_state) or []) if a != SOLO_AGENT
+            ]
+            agent_ids = preferred if len(preferred) >= 2 else agents_for_action(
                 action, prev_state, self.rng, self.policy.agent_preferences(prev_state)
             )
         else:
