@@ -31,7 +31,7 @@ def client(tmp_path_factory):
 def create_live_run(client, **overrides) -> str:
     body = {
         "task": "Determine the best policy family for cooperative orchestration",
-        "policy": "mdp",
+        "policy": "markov_game",
         "seed": 11,
         "max_steps": 12,
         "belief_dim": 4,
@@ -222,7 +222,7 @@ def test_hypotheses_can_be_named_on_first_report(client):
     if not pending["agents"]:
         pytest.skip("policy opened with TERMINATE")
 
-    names = ["vdn-mixing", "synergy-matrix", "linucb", "tabular-q"]
+    names = ["synergy-matrix", "coalition-size", "cost-pressure", "solo-baseline"]
     client.post(
         f"/api/runs/{run_id}/live/report",
         json={

@@ -10,7 +10,7 @@ from app.orchestration.state import FEATURE_DIM
 from app.orchestration.transitions import TransitionModel
 
 
-def build(policy: str = "contextual_bandit", seed: int = 7, **overrides) -> OrchestrationEngine:
+def build(policy: str = "markov_game", seed: int = 7, **overrides) -> OrchestrationEngine:
     options = {"max_steps": 25, **overrides}
     config = RunConfig(
         task="Design a reward function for cooperative agent orchestration",
@@ -168,7 +168,7 @@ def test_parallel_action_can_invoke_a_coalition():
 
 
 def test_policy_distribution_is_normalized_over_legal_actions():
-    engine = build(policy="marl", seed=8)
+    engine = build(policy="markov_game", seed=8)
     legal = engine.legal_actions()
     distribution = engine.policy.distribution(engine.state, legal)
     assert distribution.sum() == pytest.approx(1.0)

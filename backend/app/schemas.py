@@ -20,7 +20,7 @@ class RunCreate(BaseModel):
         max_length=2000,
         description="Natural-language description of the task to orchestrate.",
     )
-    policy: str = Field("contextual_bandit", description="Policy id from /api/meta/policies.")
+    policy: str = Field("markov_game", description="Policy id from /api/meta/policies.")
     strategy: str | None = Field(
         None,
         max_length=64,
@@ -86,7 +86,7 @@ class RunCreate(BaseModel):
         ),
     )
     arm: str | None = Field(
-        None, max_length=64, description="Which arm this run is, e.g. 'control' or 'marl'."
+        None, max_length=64, description="Which arm this run is, e.g. 'control' or 'cascade'."
     )
     policy_options: dict[str, Any] = Field(
         default_factory=dict,

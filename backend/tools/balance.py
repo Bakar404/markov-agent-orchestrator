@@ -2,7 +2,7 @@
 
 Runs episodes across every policy and reports termination reasons, score distribution and
 belief dynamics. This is the measurement tool for the tuning question "is a run winnable?",
-and the first concrete piece of stage 9 in the research roadmap.
+and the batch half of the offline-evaluation direction in the research roadmap.
 
     python -m tools.balance --episodes 40
 """

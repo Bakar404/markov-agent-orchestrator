@@ -104,7 +104,7 @@ def test_escalation_is_a_pure_cost_in_the_reward():
 
 
 def test_generalist_is_excluded_from_coalitions():
-    engine = build(policy="marl", budget_usd=20.0)
+    engine = build(policy="markov_game", budget_usd=20.0)
     for _ in range(25):
         if engine.done:
             break

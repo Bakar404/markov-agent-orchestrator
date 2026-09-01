@@ -1,4 +1,4 @@
-"""Stage 0 baselines: uniform sampling and a hand-tuned need-based heuristic."""
+"""Non-learning baselines: uniform sampling and a hand-tuned need-based heuristic."""
 
 from __future__ import annotations
 

@@ -44,7 +44,7 @@ class Run(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     task: Mapped[str] = mapped_column(Text, nullable=False)
-    policy: Mapped[str] = mapped_column(String(64), nullable=False, default="contextual_bandit")
+    policy: Mapped[str] = mapped_column(String(64), nullable=False, default="markov_game")
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="created")
     seed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

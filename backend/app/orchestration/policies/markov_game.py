@@ -1,4 +1,4 @@
-"""Stage 3 — cooperative Markov game orchestration.
+"""Cooperative Markov game orchestration — the only policy here that learns.
 
 The orchestrator stops treating "which agent" as a flat action and starts treating the agents
 as *players* in a cooperative stochastic game (Shapley, 1953; Littman, 1994). Each player has

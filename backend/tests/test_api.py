@@ -35,10 +35,10 @@ def test_meta_exposes_agents_actions_and_policies(client):
     }
     assert len(payload["actions"]) == 10
     assert {p["id"] for p in payload["policies"]} >= {
-        "contextual_bandit",
-        "mdp",
+        "single_agent",
+        "heuristic",
+        "fixed_sequence",
         "markov_game",
-        "marl",
     }
     assert len(payload["taxonomy"]) == 9
 
@@ -162,7 +162,7 @@ def test_search_persists_into_the_library(client):
 def test_websocket_streams_steps(client):
     run_id = client.post(
         "/api/runs",
-        json={"task": "Stream a short episode", "policy": "mdp", "seed": 5, "max_steps": 6},
+        json={"task": "Stream a short episode", "policy": "markov_game", "seed": 5, "max_steps": 6},
     ).json()["id"]
 
     with client.websocket_connect(f"/ws/runs/{run_id}") as ws:
