@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { Arena } from "@/components/game/Arena";
 import { Controls } from "@/components/game/Controls";
+import { GameTree } from "@/components/game/GameTree";
 import { GraphView } from "@/components/game/GraphView";
 import { HUD } from "@/components/game/HUD";
 import { RewardDashboard } from "@/components/game/RewardDashboard";
@@ -15,6 +16,7 @@ import { useGame } from "@/lib/store";
 
 const TABS = [
   { id: "arena", label: "ARENA" },
+  { id: "tree", label: "GAME TREE" },
   { id: "graph", label: "GRAPH" },
   { id: "rewards", label: "REWARDS" },
   { id: "traces", label: "TRACES" },
@@ -100,6 +102,8 @@ export default function Page() {
           <HUD />
         </div>
       ) : null}
+
+      {tab === "tree" ? <GameTree /> : null}
 
       {tab === "rewards" ? <RewardDashboard /> : null}
 
