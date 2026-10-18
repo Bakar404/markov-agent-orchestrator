@@ -456,3 +456,7 @@ The roster is styled after a corporate-hacker-noir aesthetic using original arch
 * [docs/Architecture.md](docs/Architecture.md) — decision formalism, transition kernel, reward decomposition, persistence
 * [docs/ResearchRoadmap.md](docs/ResearchRoadmap.md) — the game the arena implements today, and the assumptions each open direction would relax
 * [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md) — 26 decisions with rejected alternatives and accepted costs
+
+## License
+
+The code is released under the [MIT License](LICENSE). Sprite art in `frontend/public/sprites/` was generated with PixelLab and is subject to its terms of service.
