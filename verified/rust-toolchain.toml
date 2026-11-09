@@ -1,0 +1,5 @@
+# The Rust that Verus 0.2026.11.02.8bf68ee is built against. check.py runs
+# Verus and cargo on this channel; bump it only together with Verus.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"

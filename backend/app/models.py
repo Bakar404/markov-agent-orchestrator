@@ -8,7 +8,7 @@ snapshots, reward breakdowns, policy parameters).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -26,7 +26,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def new_id() -> str:
@@ -63,13 +63,13 @@ class Run(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
-    states: Mapped[list["StateSnapshot"]] = relationship(
+    states: Mapped[list[StateSnapshot]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="StateSnapshot.step"
     )
-    traces: Mapped[list["Trace"]] = relationship(
+    traces: Mapped[list[Trace]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="Trace.step"
     )
-    messages: Mapped[list["Message"]] = relationship(
+    messages: Mapped[list[Message]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="Message.step"
     )
 
@@ -180,7 +180,7 @@ class Paper(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
-    tags: Mapped[list["PaperTag"]] = relationship(
+    tags: Mapped[list[PaperTag]] = relationship(
         back_populates="paper", cascade="all, delete-orphan"
     )
 
@@ -296,3 +296,51 @@ class RunVerdict(Base):
     rubric: Mapped[str] = mapped_column(Text, nullable=False, default="")
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RunWeightPatch(Base):
+    """How a weight-space-programmed run's starting policy was written.
+
+    Holds the patch exactly as the editor proposed it, the guard's verdict, the edit metrics
+    (changed entries, fraction of parameters, relative ||dW||_F per tensor), the calibration
+    diagnostics the editor read, and the programmed policy state so a reset can restore it.
+
+    A separate table for the same reason as ``RunVerdict``: ``create_all`` adds tables, never
+    columns, so existing databases pick this up without a migration.
+    """
+
+    __tablename__ = "run_weight_patches"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    method: Mapped[str] = mapped_column(String(32), nullable=False, default="wsp")
+    editor: Mapped[str] = mapped_column(String(64), nullable=False)
+    goal: Mapped[str] = mapped_column(Text, nullable=False)
+    base: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    """Where the pre-edit weights came from: a checkpoint file name or ``default_init``."""
+    patch: Mapped[dict] = mapped_column(JSON, nullable=False)
+    verdict: Mapped[dict] = mapped_column(JSON, nullable=False)
+    limits: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
+    calibration: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    calibration_seeds: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    programmed_state: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "run_id": self.run_id,
+            "method": self.method,
+            "editor": self.editor,
+            "goal": self.goal,
+            "base": self.base,
+            "patch": self.patch,
+            "verdict": self.verdict,
+            "limits": self.limits,
+            "metrics": self.metrics,
+            "calibration": self.calibration,
+            "calibration_seeds": self.calibration_seeds,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

@@ -4,6 +4,12 @@ version = "0.1.0"
 description = "Stochastic multi-agent orchestration engine with a research intelligence layer"
 requires-python = ">=3.11"
 
+[dependency-groups]
+# Test-only extras on top of requirements.txt: pip install --group dev (pip >= 25.1).
+dev = [
+    "hypothesis>=6.100",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
@@ -12,3 +18,14 @@ filterwarnings = ["ignore::DeprecationWarning"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.File",
+    "fastapi.Form",
+]

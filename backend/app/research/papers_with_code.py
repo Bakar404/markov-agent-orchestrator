@@ -42,7 +42,7 @@ class PapersWithCodeProvider(ResearchProvider):
                 response = await client.get(url, params=params)
                 response.raise_for_status()
                 payload = response.json()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001  # Preserve degraded results for provider errors.
             return self._fallback(query, limit, started, f"{type(exc).__name__}: {exc}")
 
         papers = [self._to_record(item, query) for item in payload.get("results", [])]

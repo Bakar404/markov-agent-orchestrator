@@ -1,0 +1,14 @@
+{
+  "goal": "Escalate only when the generalist has stalled and the remaining hypotheses justify the coalition's cost; prefer the narrowest coalition that resolves them",
+  "rationale": "Before escalation ESCALATE scores 0, so the generalist's Q row is the escalation gate; calibration shows these weights escalate in every episode, by step 3. Gate: +3.0 bias keeps the run solo by default, and -2.0 on stall plus -1.6 on uncertainty drive Q_generalist negative only when the generalist has stalled AND many hypotheses remain open (stall=1, uncertainty=1 gives -0.6, about 91% escalation at temperature 0.26; without a stall it stays near 0.5%). Stop: +1.5 on confidence and -1.0 on uncertainty make TERMINATE attractive once the hypotheses are resolved, instead of paying for more coalition steps. Coalitions: calibration shows planner in most pairs; planner+researcher (-0.4) and researcher+critic (-0.4) overlap on decomposition/argument rather than resolving hypotheses, while researcher+verifier (+0.2, evidence then a check) is the narrow pair that does. Synergy stays small so a single specialist still beats any pair unless the pair earns it; researcher triples with the planner or critic net zero or less synergy, below the pair, and pay one more coalition-cost term.",
+  "edits": [
+    {"tensor": "q_weights", "index": [6, 0], "value": 3.0},
+    {"tensor": "q_weights", "index": [6, 16], "value": -2.0},
+    {"tensor": "q_weights", "index": [6, 2], "value": -1.6},
+    {"tensor": "terminate_weights", "index": [5], "value": 1.5},
+    {"tensor": "terminate_weights", "index": [2], "value": -1.0},
+    {"tensor": "synergy", "index": [1, 3], "value": 0.2},
+    {"tensor": "synergy", "index": [1, 2], "value": -0.4},
+    {"tensor": "synergy", "index": [0, 1], "value": -0.4}
+  ]
+}

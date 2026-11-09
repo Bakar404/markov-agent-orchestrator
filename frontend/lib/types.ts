@@ -125,6 +125,24 @@ export interface Strategy {
   escalates: "never" | "always" | "heuristic" | "learned";
   external_driver: string;
   policy_options: Record<string, unknown>;
+  programming?: Record<string, unknown>;
+}
+
+/** Weight-space programming summary for a wsp run: what the editor changed, guard-vetted. */
+export interface WeightPatchSummary {
+  editor: string;
+  goal: string;
+  base: Record<string, unknown>;
+  accepted: boolean;
+  edits: number;
+  changed_entries: number;
+  changed_pct: number;
+  dw_fro: number;
+  relative_dw_fro: number | null;
+  per_tensor: Record<
+    string,
+    { changed: number; dw_fro: number; relative_dw_fro: number | null }
+  >;
 }
 
 export interface PairedStat {
@@ -289,6 +307,7 @@ export interface RunDetail extends RunSummary {
   initial_state: OrchestratorState;
   preview: RunPreview;
   agents: AgentSpec[];
+  wsp?: WeightPatchSummary | null;
 }
 
 export interface Trace {

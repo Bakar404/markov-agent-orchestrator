@@ -2,15 +2,74 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from .orchestration.agents import MAX_REPORT_COST, MAX_REPORT_LATENCY_MS, MAX_REPORT_TOKENS
 
 BUDGET_CEILING = {"usd": 100.0, "aiu": 5_000.0, "tokens": 20_000_000.0}
 """Upper bound per unit. Loose enough not to obstruct, tight enough that a unit mix-up trips it."""
 
 BUDGET_FLOOR = {"usd": 0.0, "aiu": 1.0, "tokens": 1_000.0}
 """Below this a budget is almost certainly still denominated in dollars."""
+
+NUMERIC_POLICY_OPTIONS = frozenset(
+    {"temperature", "learning_rate", "synergy_lr", "discount", "coalition_cost"}
+)
+"""Policy constructor arguments that are numbers, so a boolean there is a mistake, not a 1."""
+
+
+def _require_finite_number(value: Any, where: str) -> None:
+    """A real, finite number — not a bool, not a string, not NaN or infinity."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        # ValueError, not TypeError: pydantic turns only ValueError into a 422.
+        raise ValueError(f"{where} must be a number")  # noqa: TRY004
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite:
+        raise ValueError(f"{where} must be finite")
+
+
+def _reject_nonfinite(value: Any, where: str) -> None:
+    """Walk nested containers and refuse any NaN, infinity or float-overflowing int.
+
+    A non-finite number is accepted by the request, stored with the run, and then makes every
+    response that serializes the config fail — so it has to be stopped at the door.
+    """
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int | float):
+        _require_finite_number(value, where)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _reject_nonfinite(item, f"{where}.{key}")
+    elif isinstance(value, list | tuple):
+        for index, item in enumerate(value):
+            _reject_nonfinite(item, f"{where}[{index}]")
+
+
+class WspProvenance(BaseModel):
+    """What an inline patch was written against, copied from the brief the editor read.
+
+    A patch holds absolute values, so it only means what its author intended on the weights it
+    was written for; the run refuses it if the base no longer hashes the same.
+    """
+
+    base_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    calibration_seeds: list[int] = Field(..., min_length=1, max_length=64)
+
+    @field_validator("calibration_seeds", mode="before")
+    @classmethod
+    def _seeds_are_ints(cls, value: Any) -> Any:
+        if isinstance(value, list) and any(
+            isinstance(s, bool) or not isinstance(s, int) for s in value
+        ):
+            raise ValueError("calibration_seeds must be integers")
+        return value
 
 
 class RunCreate(BaseModel):
@@ -92,6 +151,47 @@ class RunCreate(BaseModel):
         default_factory=dict,
         description="Extra policy constructor arguments, e.g. {'agent_id': 'researcher'}.",
     )
+    wsp_goal: str | None = Field(
+        None,
+        min_length=3,
+        max_length=2000,
+        description=(
+            "Weight-space-programmed strategies only: the goal the editor programs toward. "
+            "Omit for the strategy's default goal."
+        ),
+    )
+    wsp_patch: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Weight-space-programmed strategies only: a patch an editor already proposed "
+            "(e.g. the Copilot bridge), in the {goal, rationale, edits} contract. It still "
+            "passes through the guard; a file path is never accepted."
+        ),
+    )
+    wsp_provenance: WspProvenance | None = Field(
+        None,
+        description=(
+            "Required with wsp_patch: the brief's base.sha256 and calibration.seeds. The run "
+            "is refused if the base checkpoint no longer matches, and both are stored with "
+            "the patch."
+        ),
+    )
+
+    @field_validator("task_shape", mode="before")
+    @classmethod
+    def _task_shape_is_finite(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                _require_finite_number(item, f"task_shape.{key}")
+        return value
+
+    @field_validator("policy_options")
+    @classmethod
+    def _policy_options_are_finite(cls, value: dict[str, Any]) -> dict[str, Any]:
+        for key in NUMERIC_POLICY_OPTIONS & set(value):
+            _require_finite_number(value[key], f"policy_options.{key}")
+        _reject_nonfinite(value, "policy_options")
+        return value
 
     @model_validator(mode="after")
     def _budget_fits_the_unit(self) -> RunCreate:
@@ -166,7 +266,11 @@ class LiveAgentReport(BaseModel):
     agent_id: str = Field(..., description="Agent the brief was issued to.")
     outcome: Literal["success", "partial", "failure"]
     confidence: float = Field(
-        0.5, ge=0.0, le=1.0, description="How strongly the agent backs its claim."
+        0.5,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="How strongly the agent backs its claim.",
     )
     claimed_hypothesis: int | None = Field(
         None,
@@ -180,9 +284,34 @@ class LiveAgentReport(BaseModel):
         description="What the agent actually produced. Required: a step with no output is not work.",
     )
     summary: str = Field("", max_length=400)
-    tokens: int = Field(..., ge=1, description="Measured token count for this invocation.")
-    latency_ms: float = Field(..., ge=0.0, description="Measured wall-clock time.")
-    cost_usd: float = Field(..., ge=0.0, description="Measured cost. Zero is valid; absent is not.")
+    tokens: int = Field(
+        ...,
+        ge=0,
+        le=MAX_REPORT_TOKENS,
+        description="Measured token count for this invocation (at most 10**12).",
+    )
+    latency_ms: float = Field(
+        ...,
+        ge=0.0,
+        le=MAX_REPORT_LATENCY_MS,
+        allow_inf_nan=False,
+        description="Measured wall-clock time (at most 1e9 ms).",
+    )
+    cost_usd: float = Field(
+        ...,
+        ge=0.0,
+        le=MAX_REPORT_COST,
+        allow_inf_nan=False,
+        description="Measured cost, in the run's cost unit (at most 1e8). Zero is valid; absent is not.",
+    )
+
+    @field_validator("confidence", "tokens", "latency_ms", "cost_usd", mode="before")
+    @classmethod
+    def _numbers_are_not_booleans(cls, value: Any) -> Any:
+        # Lax mode would read `true` as 1, which is a type error in the report, not a measurement.
+        if isinstance(value, bool):
+            raise ValueError("must be a number, not a boolean")  # noqa: TRY004
+        return value
 
     @field_validator("response")
     @classmethod

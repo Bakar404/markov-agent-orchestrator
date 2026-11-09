@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Minimum version and Ruff target from backend/pyproject.toml.
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+      - name: Install dependencies
+        id: install
+        run: python -m pip install -r requirements.txt ruff
+      - name: Lint
+        run: python -m ruff check --config pyproject.toml .
+      - name: Test
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: python -m pytest tests/ -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+
+  bridge:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bridge/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Test routing
+        run: python compare_routing.py
+
+  # Proof-driven checks for the escalation gate, budget accounting and the WSP guard: Verus
+  # proves verified/src/lib.rs, planted bugs must be rejected, and Hypothesis checks that the
+  # Python behaves exactly like the proved kernel. See verified/README.md.
+  verified:
+    runs-on: ubuntu-latest
+    env:
+      VERUS_VERSION: 0.2026.11.02.8bf68ee
+      VERUS_SHA256: f3a0119292df8855e4435da8130bee1873b0e6a60c306accf81a08ea687bba3c
+      RUST_TOOLCHAIN: 1.99.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+      - name: Install Python dependencies
+        # --group needs pip 25.1; the dev group carries Hypothesis.
+        run: |
+          python -m pip install --upgrade "pip>=25.1"
+          python -m pip install -r backend/requirements.txt --group backend/pyproject.toml:dev
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        # The channel in verified/rust-toolchain.toml; Verus checks against this exact rustc.
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+      - name: Install Verus ${{ env.VERUS_VERSION }}
+        run: |
+          zip="verus-${VERUS_VERSION}-x86-linux.zip"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$zip" \
+            "https://github.com/verus-lang/verus/releases/download/release/${VERUS_VERSION}/${zip}"
+          echo "${VERUS_SHA256}  $RUNNER_TEMP/$zip" | sha256sum --check --strict
+          unzip -q "$RUNNER_TEMP/$zip" -d "$RUNNER_TEMP/verus"
+          verus="$(find "$RUNNER_TEMP/verus" -type f -name verus -perm -u+x | head -n 1)"
+          test -n "$verus"
+          echo "VERUS=$verus" >> "$GITHUB_ENV"
+          "$verus" --version
+      - name: Prove, mutate, build, differential test, negative control
+        env:
+          REQUIRE_VERIFIED: "1"
+        run: python verified/check.py
+      - name: Upload receipt
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-receipt
+          path: |
+            verified/target/receipt.json
+            verified/target/differential.json
+            verified/target/logs/
+          if-no-files-found: warn

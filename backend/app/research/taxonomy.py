@@ -104,6 +104,16 @@ CATEGORIES: tuple[Category, ...] = (
         ),
     ),
     Category(
+        name="Weight-Space Programming",
+        description="Language models edit neural network weights directly from stated goals.",
+        color="#e879f9",
+        keywords=("weight-space programming", "weight space programming", "weight editing"),
+        discovery_queries=(
+            "Sparks of Weight-Space Programming",
+            "language model edits neural network weights directly",
+        ),
+    ),
+    Category(
         name="Planning",
         description="Search, tree-based planning and hierarchical decomposition.",
         color="#fbbf24",

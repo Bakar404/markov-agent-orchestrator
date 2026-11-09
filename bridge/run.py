@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from arena_bridge.arena import Arena, ArenaError  # noqa: E402
 from arena_bridge.driver import ArmResult, drive_arm  # noqa: E402
 from arena_bridge.judge import Judge  # noqa: E402
+from arena_bridge.wsp import check_evaluation_seeds, program_patch  # noqa: E402
 
 CONTROL = "control"
 
@@ -113,6 +114,18 @@ async def main() -> int:
         default=300.0,
         help="A haiku call takes 10-25s, so a wait this long means the session has hung.",
     )
+    parser.add_argument(
+        "--wsp-editor",
+        choices=("recorded", "copilot"),
+        default="recorded",
+        help=(
+            "Who writes the weights of a weight-space-programmed arm (wsp_markov_game). "
+            "'recorded' replays the patch shipped with the strategy; 'copilot' asks "
+            "--wsp-model once per experiment. Either way the arena's guard vets the patch."
+        ),
+    )
+    parser.add_argument("--wsp-model", default="claude-opus-5")
+    parser.add_argument("--wsp-goal", default=None, help="Defaults to the strategy's goal.")
     args = parser.parse_args()
 
     arms = args.arms or [CONTROL, "cascade"]
@@ -124,6 +137,12 @@ async def main() -> int:
             "error: at least three competing hypotheses. Four is better — four rephrasings of "
             "one answer collapse the belief trivially and produce a result that is not real."
         )
+        return 2
+    try:
+        # Before the editor call: a bad seed found afterwards has already cost a model call.
+        check_evaluation_seeds(args.seeds)
+    except ValueError as exc:
+        say(f"error: {exc}")
         return 2
     if len(args.seeds) < 5:
         print(
@@ -145,6 +164,23 @@ async def main() -> int:
     }
 
     with Arena(args.api) as arena:
+        programmed = {
+            s["id"] for s in arena.strategies() if s.get("programming") and s["id"] in arms
+        }
+        wsp: dict | None = None
+        if programmed and (args.wsp_editor == "copilot" or args.wsp_goal):
+            if args.wsp_editor != "copilot":
+                say("error: --wsp-goal needs --wsp-editor copilot; a recorded patch has its goal.")
+                return 2
+            say(f"\n=== programming weights with {args.wsp_model} ===")
+            wsp = await program_patch(
+                arena, model=args.wsp_model, goal=args.wsp_goal,
+                max_steps=args.max_steps, belief_dim=len(args.hypotheses),
+                budget=args.budget, latency_budget_ms=args.latency_budget_ms,
+            )
+            patch = wsp["wsp_patch"]
+            say(f"    {len(patch['edits'])} edits: {patch['rationale'][:200]}")
+
         results: dict[int, dict[str, ArmResult]] = {}
         for seed in args.seeds:
             results[seed] = {}
@@ -168,6 +204,7 @@ async def main() -> int:
                         agent_models=agent_models,
                         agent_timeout_s=args.agent_timeout_s,
                         on_event=log,
+                        wsp=wsp if arm in programmed else None,
                     )
                 except Exception as exc:  # noqa: BLE001 - one arm must not cost the rest
                     say(f"    ABANDONED: {type(exc).__name__}: {exc}")

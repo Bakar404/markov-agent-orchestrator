@@ -18,7 +18,7 @@ from itertools import combinations
 
 import numpy as np
 
-from ..actions import ACTIONS, ACTION_INDEX, AGENT_TO_ACTION, Action
+from ..actions import ACTION_INDEX, ACTIONS, AGENT_TO_ACTION, Action
 from ..agents import AGENT_IDS, SOLO_AGENT
 from ..state import OrchestratorState
 from .base import Policy
@@ -72,7 +72,10 @@ class CooperativeMarkovGamePolicy(Policy):
     ) -> float:
         values = self._player_values(state) if values is None else values
         total = float(values[list(indices)].sum())
-        for i, j in combinations(indices, 2):
+        # synergy[i, j] is canonical for i < j: it is the entry the weight-space editor may write
+        # and the guard checks. A caller's agent order (a live report listing the verifier
+        # before the researcher) must not route the read to the lower triangle.
+        for i, j in combinations(sorted(indices), 2):
             total += float(self.synergy[i, j])
         total -= self.coalition_cost * (len(indices) - 1) * self._cost_pressure(state)
         return total
@@ -175,10 +178,12 @@ class CooperativeMarkovGamePolicy(Policy):
         # Synergy absorbs whatever the additive decomposition cannot explain.
         predicted = self.coalition_value(state, indices)
         residual = target - predicted
-        pairs = list(combinations(indices, 2))
+        pairs = list(combinations(sorted(indices), 2))
         if pairs:
             share = self.synergy_lr * residual / len(pairs)
             for i, j in pairs:
+                # Learn on the canonical upper entry and mirror it down; never the reverse,
+                # or a stale lower entry would overwrite an edited upper one.
                 self.synergy[i, j] += share
                 self.synergy[j, i] = self.synergy[i, j]
 

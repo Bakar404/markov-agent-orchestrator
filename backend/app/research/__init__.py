@@ -9,13 +9,13 @@ from .service import ResearchService
 from .taxonomy import CATEGORY_NAMES, taxonomy_catalog
 
 __all__ = [
+    "CATEGORY_NAMES",
+    "DEFAULT_PROVIDERS",
+    "HITSMCPResearchProvider",
     "PaperRecord",
     "ProviderResponse",
     "ResearchProvider",
-    "HITSMCPResearchProvider",
     "ResearchService",
-    "DEFAULT_PROVIDERS",
-    "CATEGORY_NAMES",
     "get_provider",
     "provider_registry",
     "resolve_providers",

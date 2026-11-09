@@ -26,9 +26,11 @@ router = APIRouter(tags=["ws"])
 
 MIN_INTERVAL_S = 0.05
 MAX_INTERVAL_S = 5.0
+MAX_SEED = 2**31 - 1
+"""Matches RunResetRequest.seed, the bound the REST reset enforces."""
 
 
-def _clamp_interval(interval_ms: float | int | None, fallback: float) -> float:
+def _clamp_interval(interval_ms: float | None, fallback: float) -> float:
     if interval_ms is None:
         return fallback
     return max(MIN_INTERVAL_S, min(float(interval_ms) / 1000.0, MAX_INTERVAL_S))
@@ -89,15 +91,33 @@ async def run_socket(websocket: WebSocket, run_id: str) -> None:
                     continue
                 if kind == "reset":
                     playing = False
-                    async with lock:
-                        with session_scope() as session:
-                            detail = RunService(session).reset(
-                                run_id,
-                                seed=command.get("seed"),
-                                keep_policy_learning=bool(
-                                    command.get("keep_policy_learning", False)
-                                ),
-                            )
+                    seed = command.get("seed")
+                    if seed is not None and (
+                        isinstance(seed, bool)
+                        or not isinstance(seed, int)
+                        or not 0 <= seed <= MAX_SEED
+                    ):
+                        # The REST reset validates this through its schema; the socket gets
+                        # raw JSON, so a float, a string or 2**80 has to be refused here.
+                        await send({
+                            "type": "error",
+                            "detail": f"seed must be an integer in [0, {MAX_SEED}]",
+                        })
+                        continue
+                    try:
+                        async with lock:
+                            with session_scope() as session:
+                                detail = RunService(session).reset(
+                                    run_id,
+                                    seed=seed,
+                                    keep_policy_learning=bool(
+                                        command.get("keep_policy_learning", False)
+                                    ),
+                                )
+                    except ValueError as exc:
+                        # A calibration-band seed is the caller's mistake; keep the socket.
+                        await send({"type": "error", "detail": str(exc)})
+                        continue
                     await send({"type": "snapshot", "run": detail})
                     continue
                 if kind == "close":
@@ -137,7 +157,7 @@ async def run_socket(websocket: WebSocket, run_id: str) -> None:
 
     except WebSocketDisconnect:
         return
-    except Exception as exc:  # surface engine errors to the client instead of dropping
+    except Exception as exc:  # noqa: BLE001  # Surface engine errors to the client.
         with contextlib.suppress(Exception):
             await send({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
     finally:
