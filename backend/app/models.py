@@ -8,7 +8,7 @@ snapshots, reward breakdowns, policy parameters).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -26,7 +26,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def new_id() -> str:
@@ -63,13 +63,13 @@ class Run(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
-    states: Mapped[list["StateSnapshot"]] = relationship(
+    states: Mapped[list[StateSnapshot]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="StateSnapshot.step"
     )
-    traces: Mapped[list["Trace"]] = relationship(
+    traces: Mapped[list[Trace]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="Trace.step"
     )
-    messages: Mapped[list["Message"]] = relationship(
+    messages: Mapped[list[Message]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="Message.step"
     )
 
@@ -180,7 +180,7 @@ class Paper(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
-    tags: Mapped[list["PaperTag"]] = relationship(
+    tags: Mapped[list[PaperTag]] = relationship(
         back_populates="paper", cascade="all, delete-orphan"
     )
 

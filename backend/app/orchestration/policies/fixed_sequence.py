@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..actions import ACTIONS, ACTION_INDEX, Action, SINGLE_AGENT_ACTIONS
+from ..actions import ACTION_INDEX, ACTIONS, SINGLE_AGENT_ACTIONS, Action
 from ..state import OrchestratorState
 from .base import Policy
 

@@ -21,7 +21,7 @@ from .actions import (
     Action,
 )
 from .agents import AGENTS, SOLO_AGENT
-from .live import AgentBrief, PendingStep, build_brief, default_hypotheses
+from .live import PendingStep, build_brief, default_hypotheses
 from .policies import DEFAULT_POLICY, ExternalPolicy, Policy, create_policy
 from .rewards import RewardModel
 from .state import FEATURE_DIM, OrchestratorState, initial_state
@@ -84,7 +84,7 @@ class RunConfig:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "RunConfig":
+    def from_dict(cls, payload: dict) -> RunConfig:
         known = {k: v for k, v in payload.items() if k in cls.__dataclass_fields__}
         return cls(**known)
 
@@ -307,7 +307,7 @@ class OrchestrationEngine:
             self.policy.consume()
 
     # --------------------------------------------------------------- phases
-    def _decide(self) -> "_Decision":
+    def _decide(self) -> _Decision:
         if self.state.terminated:
             raise RuntimeError("Run has already terminated")
 
@@ -348,7 +348,7 @@ class OrchestrationEngine:
             started=started,
         )
 
-    def _realize(self, decision: "_Decision", outcome: TransitionOutcome) -> StepResult:
+    def _realize(self, decision: _Decision, outcome: TransitionOutcome) -> StepResult:
         prev_state = decision.prev_state
         action = decision.action
         probability = decision.probability
@@ -579,7 +579,7 @@ class OrchestrationEngine:
         }
 
     @classmethod
-    def restore(cls, snapshot: dict, settings: Settings | None = None) -> "OrchestrationEngine":
+    def restore(cls, snapshot: dict, settings: Settings | None = None) -> OrchestrationEngine:
         config = RunConfig.from_dict(snapshot["config"])
         engine = cls(config, settings=settings)
         engine.state = OrchestratorState.from_dict(snapshot["state"])

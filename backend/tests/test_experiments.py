@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.orchestration.actions import Action, SINGLE_AGENT_ACTIONS
+from app.orchestration.actions import SINGLE_AGENT_ACTIONS, Action
 from app.orchestration.engine import OrchestrationEngine, RunConfig
 from app.orchestration.policies import POLICY_REGISTRY, create_policy
 from app.orchestration.state import FEATURE_DIM
@@ -14,9 +13,10 @@ from app.orchestration.state import FEATURE_DIM
 @pytest.fixture(scope="module")
 def client(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("experiments") / "test.db"
-    import app.db as db_module
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
+    import app.db as db_module
 
     engine = create_engine(
         f"sqlite:///{db_path.as_posix()}", connect_args={"check_same_thread": False}

@@ -11,9 +11,10 @@ from app.orchestration.live import report_from_response
 @pytest.fixture(scope="module")
 def client(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("live") / "test.db"
-    import app.db as db_module
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
+    import app.db as db_module
 
     engine = create_engine(
         f"sqlite:///{db_path.as_posix()}", connect_args={"check_same_thread": False}

@@ -28,7 +28,7 @@ MIN_INTERVAL_S = 0.05
 MAX_INTERVAL_S = 5.0
 
 
-def _clamp_interval(interval_ms: float | int | None, fallback: float) -> float:
+def _clamp_interval(interval_ms: float | None, fallback: float) -> float:
     if interval_ms is None:
         return fallback
     return max(MIN_INTERVAL_S, min(float(interval_ms) / 1000.0, MAX_INTERVAL_S))
@@ -137,7 +137,7 @@ async def run_socket(websocket: WebSocket, run_id: str) -> None:
 
     except WebSocketDisconnect:
         return
-    except Exception as exc:  # surface engine errors to the client instead of dropping
+    except Exception as exc:  # noqa: BLE001  # Surface engine errors to the client.
         with contextlib.suppress(Exception):
             await send({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
     finally:

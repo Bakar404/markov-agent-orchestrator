@@ -51,7 +51,7 @@ class SemanticScholarProvider(ResearchProvider):
                 response = await client.get(url, params=params, headers=self._headers())
                 response.raise_for_status()
                 payload = response.json()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001  # Preserve degraded results for provider errors.
             return self._fallback(query, limit, started, f"{type(exc).__name__}: {exc}")
 
         papers = [self._to_record(item, query) for item in payload.get("data", [])]
@@ -77,7 +77,7 @@ class SemanticScholarProvider(ResearchProvider):
                 response = await client.get(url, params=params, headers=self._headers())
                 response.raise_for_status()
                 payload = response.json()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001  # Return reference errors as degraded responses.
             return ProviderResponse(
                 provider=self.id,
                 query=paper_id,

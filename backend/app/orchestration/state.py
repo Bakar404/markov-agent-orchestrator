@@ -86,7 +86,7 @@ class AgentHistory:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "AgentHistory":
+    def from_dict(cls, payload: dict) -> AgentHistory:
         return cls(
             alpha=float(payload.get("alpha", 1.0)),
             beta=float(payload.get("beta", 1.0)),
@@ -219,7 +219,7 @@ class OrchestratorState:
         return tuple(int(v) for v in idx)
 
     # ------------------------------------------------------------- lifecycle
-    def copy(self) -> "OrchestratorState":
+    def copy(self) -> OrchestratorState:
         return replace(
             self,
             belief=list(self.belief),
@@ -274,7 +274,7 @@ class OrchestratorState:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "OrchestratorState":
+    def from_dict(cls, payload: dict) -> OrchestratorState:
         return cls(
             step=int(payload.get("step", 0)),
             task_complexity=float(payload.get("task_complexity", 0.5)),

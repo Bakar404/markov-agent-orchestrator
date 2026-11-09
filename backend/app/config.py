@@ -62,7 +62,7 @@ class RewardWeights:
     terminal: float = 2.5
 
     @classmethod
-    def from_env(cls) -> "RewardWeights":
+    def from_env(cls) -> RewardWeights:
         return cls(
             quality=_env_float("REWARD_W_QUALITY", 1.4),
             verification=_env_float("REWARD_W_VERIFICATION", 1.1),

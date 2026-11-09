@@ -46,7 +46,7 @@ class ArxivProvider(ResearchProvider):
                 response = await client.get(self.settings.arxiv_base_url, params=params)
                 response.raise_for_status()
                 papers = self._parse(response.text, query)
-        except Exception as exc:  # network, parse, or HTTP error - degrade, never fail
+        except Exception as exc:  # noqa: BLE001  # Preserve degraded results for provider errors.
             return self._fallback(query, limit, started, f"{type(exc).__name__}: {exc}")
 
         return ProviderResponse(
