@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from .arena import Arena, ArenaError
 from .executor import AgentPool, Invocation
 from .workflows import build_workflow
+from .wsp import programmed_run_fields
 
 
 @dataclass
@@ -59,11 +60,16 @@ async def drive_arm(
     retries: int = 2,
     retry_pause_s: float = 20.0,
     on_event=None,
+    wsp: dict | None = None,
 ) -> ArmResult:
     def emit(kind: str, **payload: object) -> None:
         if on_event:
             on_event(kind, {"arm": arm, "seed": seed, **payload})
 
+    # A weight-space-programmed arm carries the patch its editor wrote, the goal it was written
+    # for and its provenance (program_patch builds all three); the arena's guard still vets
+    # the patch, and every seed of the arm gets the same one.
+    extra = programmed_run_fields(wsp)
     run = arena.create_run(
         task=task,
         strategy=strategy,
@@ -79,6 +85,7 @@ async def drive_arm(
         default_model=default_model,
         agent_models=agent_models or {},
         cost_unit="tokens",
+        **extra,
     )
     run_id = run["id"]
     emit("run_created", run_id=run_id, watch=f"http://localhost:3000/?run={run_id}")

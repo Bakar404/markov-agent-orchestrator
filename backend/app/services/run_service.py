@@ -15,15 +15,39 @@ from collections import defaultdict
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from ..models import Message, Paper, Run, StateSnapshot, Trace
+from ..models import Message, Paper, Run, RunWeightPatch, StateSnapshot, Trace
 from ..orchestration.agents import AGENTS, agent_catalog
 from ..orchestration.engine import OrchestrationEngine, RunConfig, StepResult
 from ..orchestration.live import report_from_response
 from ..orchestration.strategies import get_strategy
+from ..orchestration.wsp.apply import install_weights
+from ..orchestration.wsp.calibrate import (
+    CALIBRATION_SEED_BAND,
+    SeedLeakError,
+    calibration_overrides,
+    is_calibration_seed,
+)
 from ..schemas import RunCreate
 
 _engines: dict[str, OrchestrationEngine] = {}
 _locks: dict[str, asyncio.Lock] = {}
+
+
+def draw_seed() -> int:
+    """A random evaluation seed — never one from the reserved calibration band."""
+    while True:
+        seed = random.randrange(1, 2**31 - 1)
+        if not is_calibration_seed(seed):
+            return seed
+
+
+def check_evaluation_seed(seed: int) -> None:
+    if is_calibration_seed(seed):
+        raise SeedLeakError(
+            f"seed {seed} is reserved for weight-space-programming calibration "
+            f"({CALIBRATION_SEED_BAND.start}..{CALIBRATION_SEED_BAND.stop - 1}); evaluation "
+            "seeds must lie outside that band"
+        )
 
 
 def run_lock(run_id: str) -> asyncio.Lock:
@@ -44,16 +68,30 @@ class RunService:
 
     # -------------------------------------------------------------- create
     def create(self, payload: RunCreate) -> dict:
-        seed = payload.seed if payload.seed is not None else random.randrange(1, 2**31 - 1)
+        seed = payload.seed if payload.seed is not None else draw_seed()
 
         policy = payload.policy
         policy_options = dict(payload.policy_options)
         arm = payload.arm
+        programming: dict | None = None
         if payload.strategy:
             strategy = get_strategy(payload.strategy)
             policy = strategy.policy
             policy_options = {**(strategy.policy_options or {}), **policy_options}
             arm = arm or strategy.id
+            programming = strategy.programming
+        if (payload.wsp_patch is not None or payload.wsp_goal is not None) and not programming:
+            raise ValueError("wsp_patch and wsp_goal need a weight-space-programmed strategy")
+        if payload.wsp_patch is not None and payload.wsp_provenance is None:
+            raise ValueError(
+                "an inline wsp_patch needs wsp_provenance {base_sha256, calibration_seeds}, "
+                "copied from the /api/wsp/brief the editor read"
+            )
+        if payload.wsp_provenance is not None and payload.wsp_patch is None:
+            raise ValueError("wsp_provenance describes an inline wsp_patch; send one with it")
+        # The calibration band is off limits to every run, not just experiment arms: a seed
+        # there would let a later WSP brief have calibrated on an episode someone scored.
+        check_evaluation_seed(seed)
 
         config = RunConfig(
             task=payload.task,
@@ -79,6 +117,12 @@ class RunService:
             policy_options=policy_options,
         )
         engine = OrchestrationEngine(config)
+        programmed = None
+        if programming:
+            programmed = self._program(engine, programming, payload)
+            # Only the weight tensors come from the program; temperature, learning rate and
+            # discount stay as config.policy_options built them.
+            install_weights(engine.policy, programmed.policy_state)
         snapshot = engine.snapshot()
 
         run = Run(
@@ -93,6 +137,10 @@ class RunService:
         )
         self.session.add(run)
         self.session.flush()
+        if programmed is not None:
+            self.session.add(
+                self._weight_patch_row(run.id, programming, programmed, payload.wsp_provenance)
+            )
 
         self.session.add(
             StateSnapshot(
@@ -106,6 +154,86 @@ class RunService:
         self.session.commit()
         _engines[run.id] = engine
         return self.detail(run.id)
+
+    # ------------------------------------------------- weight-space programming
+    def _program(self, engine: OrchestrationEngine, programming: dict, payload: RunCreate):
+        """Write the arm's starting weights: calibrate, edit toward the goal, guard, apply."""
+        from ..orchestration.wsp.calibrate import DEFAULT_CALIBRATION_SEEDS
+        from ..orchestration.wsp.program import DEFAULT_GOAL, make_editor, program
+
+        if programming.get("method") != "wsp":
+            raise ValueError(f"unknown programming method {programming.get('method')!r}")
+        if engine.config.policy != "markov_game":
+            raise ValueError("weight-space programming targets the markov_game policy")
+        goal = payload.wsp_goal or programming.get("goal") or DEFAULT_GOAL
+        editor = make_editor(programming, payload.wsp_patch)
+
+        # Every seed of an experiment must program the same base. The first programmed run
+        # pins its checkpoint hash; a later seed whose checkpoint hashes differently is refused
+        # rather than quietly evaluating a different network under the same arm name.
+        pinned = self._experiment_base_sha(engine.config.experiment)
+        provenance = payload.wsp_provenance
+        if provenance is not None and pinned is not None and provenance.base_sha256 != pinned:
+            raise ValueError(
+                f"wsp_provenance names base {provenance.base_sha256[:12]}…, but experiment "
+                f"'{engine.config.experiment}' is pinned to {pinned[:12]}…"
+            )
+        return program(
+            editor,
+            goal=goal,
+            calibration_seeds=(
+                tuple(provenance.calibration_seeds) if provenance else DEFAULT_CALIBRATION_SEEDS
+            ),
+            evaluation_seeds=(engine.config.seed,),
+            base_sha256=provenance.base_sha256 if provenance else pinned,
+            **calibration_overrides(engine.config.to_dict()),
+        )
+
+    def _experiment_base_sha(self, experiment: str | None) -> str | None:
+        if not experiment:
+            return None
+        rows = self.session.execute(
+            select(Run.config, RunWeightPatch.base)
+            .join(RunWeightPatch, RunWeightPatch.run_id == Run.id)
+            .order_by(RunWeightPatch.created_at)
+        ).all()
+        for config, base in rows:
+            if (config or {}).get("experiment") == experiment and (base or {}).get("sha256"):
+                return base["sha256"]
+        return None
+
+    @staticmethod
+    def _weight_patch_row(
+        run_id: str, programming: dict, programmed, provenance=None
+    ) -> RunWeightPatch:
+        applied = programmed.applied.to_dict()
+        base = dict(programmed.brief.base)
+        if provenance is not None:
+            # An inline patch was written elsewhere; record what its author says it was written
+            # against. Both fields were checked against this run's base and calibration above.
+            base["patch_provenance"] = provenance.model_dump()
+        return RunWeightPatch(
+            run_id=run_id,
+            method=programming.get("method", "wsp"),
+            editor=programmed.editor,
+            goal=programmed.brief.goal,
+            base=base,
+            patch=applied["patch"],
+            verdict=applied["verdict"],
+            limits=applied["limits"],
+            metrics=applied["metrics"],
+            calibration=programmed.brief.calibration,
+            calibration_seeds=programmed.brief.calibration["seeds"],
+            programmed_state=programmed.policy_state,
+        )
+
+    def _weight_patch(self, run_id: str) -> RunWeightPatch | None:
+        return self.session.scalar(select(RunWeightPatch).where(RunWeightPatch.run_id == run_id))
+
+    def weight_patch(self, run_id: str) -> dict | None:
+        self._run(run_id)
+        row = self._weight_patch(run_id)
+        return row.to_dict() if row is not None else None
 
     # -------------------------------------------------------------- engine
     def engine_for(self, run_id: str) -> OrchestrationEngine:
@@ -319,11 +447,17 @@ class RunService:
         run = self._run(run_id)
         previous = _engines.get(run_id)
         config = RunConfig.from_dict(run.config)
-        config.seed = seed if seed is not None else random.randrange(1, 2**31 - 1)
+        weight_patch = self._weight_patch(run_id)
+        if seed is not None:
+            check_evaluation_seed(seed)
+        config.seed = seed if seed is not None else draw_seed()
 
         engine = OrchestrationEngine(config)
         if keep_policy_learning and previous is not None:
             engine.policy.load_state_dict(previous.policy.state_dict())
+        elif weight_patch is not None:
+            # A fresh engine would start from default weights and silently drop the program.
+            install_weights(engine.policy, weight_patch.programmed_state)
 
         self.session.execute(delete(Trace).where(Trace.run_id == run.id))
         self.session.execute(delete(Message).where(Message.run_id == run.id))
@@ -382,6 +516,7 @@ class RunService:
         run = self._run(run_id)
         engine = self.engine_for(run_id)
         payload = self._summary(run)
+        weight_patch = self._weight_patch(run_id)
         payload.update(
             {
                 "config": run.config,
@@ -389,6 +524,7 @@ class RunService:
                 "initial_state": run.initial_state,
                 "preview": engine.preview(),
                 "agents": agent_catalog(),
+                "wsp": _wsp_summary(weight_patch) if weight_patch is not None else None,
             }
         )
         return payload
@@ -604,3 +740,29 @@ class RunService:
 
 def library_size(session: Session) -> int:
     return session.scalar(select(func.count()).select_from(Paper)) or 0
+
+
+def _wsp_summary(row: RunWeightPatch) -> dict:
+    """The compact view of a run's weight patch, for the HUD. The full artifact is at /wsp."""
+    metrics = row.metrics or {}
+    return {
+        "editor": row.editor,
+        "goal": row.goal,
+        "base": (row.base or {}).get("source"),
+        "accepted": bool((row.verdict or {}).get("accepted")),
+        "edits": len((row.patch or {}).get("edits", [])),
+        "changed_entries": metrics.get("changed_entries"),
+        "changed_fraction": metrics.get("changed_fraction"),
+        "changed_fraction_raw": metrics.get("changed_fraction_raw"),
+        "changed_pct": metrics.get("changed_pct"),
+        "dw_fro": metrics.get("dw_fro"),
+        "relative_dw_fro": metrics.get("relative_dw_fro"),
+        "per_tensor": {
+            name: {
+                "changed": t.get("changed"),
+                "dw_fro": t.get("dw_fro"),
+                "relative_dw_fro": t.get("relative_dw_fro"),
+            }
+            for name, t in (metrics.get("per_tensor") or {}).items()
+        },
+    }

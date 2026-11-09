@@ -543,6 +543,17 @@
       "summary": "Learns a router between a strong and a weak model from human preference data, with an explicit cost-quality operating curve. The single-step special case of the orchestration problem posed here.",
       "tags": ["Agent Routing"],
       "references": ["chen2023frugalgpt", "shazeer2017moe"]
+    },
+    {
+      "key": "takehi2026wsp",
+      "title": "Sparks of Weight-Space Programming",
+      "authors": ["Takehi", "Teoh", "Zhang", "Khattab"],
+      "year": 2026,
+      "venue": "",
+      "url": "https://rikiyat.github.io/blog/weight-space-programming/",
+      "summary": "A general language model reads a network's raw weights and edits them directly from a natural-language goal, with no gradient step; each edit is characterised by how many entries change, what fraction of the parameters that is, and the relative Frobenius norm of the change. The wsp_markov_game arm applies the idea to the cooperative Markov game router, behind a guard. Authors at MIT CSAIL.",
+      "tags": ["Weight-Space Programming"],
+      "references": []
     }
   ]
 }

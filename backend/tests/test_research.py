@@ -54,6 +54,32 @@ def test_classify_assigns_known_categories():
     assert all(tag in CATEGORY_NAMES for tag in tags)
 
 
+def test_wsp_strategy_paper_resolves_to_weight_space_category():
+    from app.orchestration.strategies import get_strategy
+
+    strategy = get_strategy("wsp_markov_game")
+    assert strategy.category == "Weight-Space Programming"
+    assert classify("Sparks of Weight-Space Programming") == [strategy.category]
+    paper = search_corpus(strategy.paper_query, limit=1)[0]
+    assert paper.notes == "takehi2026wsp"
+    assert strategy.category in paper.tags
+    assert "Reinforcement Learning" not in paper.tags
+
+
+def test_weight_space_category_colour_is_its_own():
+    from app.research.taxonomy import CATEGORIES
+
+    colours = {c.name: c.color.lower() for c in CATEGORIES}
+    assert len(set(colours.values())) == len(colours)
+
+    def rgb(hex_colour: str) -> tuple[int, ...]:
+        return tuple(int(hex_colour[i:i + 2], 16) for i in (1, 3, 5))
+
+    wsp, rl = rgb(colours["Weight-Space Programming"]), rgb(colours["Reinforcement Learning"])
+    # Not another shade of RL's green: far apart in RGB, not just a different hex string.
+    assert sum((a - b) ** 2 for a, b in zip(wsp, rl, strict=True)) ** 0.5 > 150
+
+
 def test_relevance_score_is_bounded_and_query_sensitive():
     high = relevance_score(
         title="Markov games as a framework for multi-agent reinforcement learning",

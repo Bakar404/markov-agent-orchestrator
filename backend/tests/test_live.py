@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -96,6 +98,40 @@ def test_report_advances_and_records_measured_cost(client):
     assert step["tokens"] == 1234 * len(pending["agents"])
     assert all(report["source"] == "live" for report in step["reports"])
     assert all(report["claimed_hypothesis"] == 1 for report in step["reports"])
+
+
+def test_zero_measurements_are_preserved(client):
+    run_id = create_live_run(client, strategy="control")
+    pending = client.post(f"/api/runs/{run_id}/live/open").json()
+    reports = reports_for(pending)
+    for report in reports:
+        report.update(tokens=0, latency_ms=0.0, cost_usd=0.0)
+    response = client.post(
+        f"/api/runs/{run_id}/live/report",
+        json={"token": pending["token"], "reports": reports},
+    )
+    assert response.status_code == 200, response.text
+    step = response.json()["step"]
+    assert (step["tokens"], step["latency_ms"], step["cost_usd"]) == (0, 0.0, 0.0)
+    assert all((r["tokens"], r["latency_ms"], r["cost_usd"]) == (0, 0.0, 0.0)
+               for r in step["reports"])
+
+
+@pytest.mark.parametrize("field", ["latency_ms", "cost_usd", "tokens"])
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan"), -1])
+def test_invalid_measurements_return_422(client, field, value):
+    run_id = create_live_run(client, strategy="control")
+    pending = client.post(f"/api/runs/{run_id}/live/open").json()
+    reports = reports_for(pending)
+    reports[0][field] = value
+    response = client.post(
+        f"/api/runs/{run_id}/live/report",
+        content=json.dumps({"token": pending["token"], "reports": reports}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422, response.text
+    assert field in response.text
+    assert client.get(f"/api/runs/{run_id}").json()["step_count"] == 0
 
 
 def test_belief_mass_follows_the_claim(client):
@@ -252,3 +288,107 @@ def test_wrong_hypothesis_count_is_rejected(client):
         },
     )
     assert response.status_code == 422
+
+
+# ------------------------------------------------------------- overflow and bounds (review 1, 2, 7)
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("cost_usd", 1e308),
+        ("cost_usd", 10**400),
+        ("cost_usd", True),
+        ("latency_ms", 1e308),
+        ("latency_ms", 1e10),
+        ("tokens", 2**63),
+        ("tokens", 10**400),
+        ("tokens", 12.5),
+        ("tokens", True),
+        ("confidence", True),
+        ("confidence", float("nan")),
+        ("confidence", float("inf")),
+    ],
+)
+def test_out_of_range_measurements_are_refused_and_change_nothing(client, field, value):
+    run_id = create_live_run(client, strategy="control")
+    pending = client.post(f"/api/runs/{run_id}/live/open").json()
+    reports = reports_for(pending)
+    reports[0][field] = value
+    response = client.post(
+        f"/api/runs/{run_id}/live/report",
+        content=json.dumps({"token": pending["token"], "reports": reports}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422, response.text
+    assert client.get(f"/api/runs/{run_id}").json()["step_count"] == 0
+    # The step is still open and the same token still works: nothing was half-committed.
+    retry = client.post(
+        f"/api/runs/{run_id}/live/report",
+        json={"token": pending["token"], "reports": reports_for(pending)},
+    )
+    assert retry.status_code == 200, retry.text
+
+
+def test_measurements_at_the_caps_still_encode(client):
+    from app.orchestration.agents import (
+        MAX_REPORT_COST,
+        MAX_REPORT_LATENCY_MS,
+        MAX_REPORT_TOKENS,
+    )
+
+    run_id = create_live_run(client, strategy="control")
+    pending = client.post(f"/api/runs/{run_id}/live/open").json()
+    reports = reports_for(pending)
+    for report in reports:
+        report.update(tokens=MAX_REPORT_TOKENS, latency_ms=MAX_REPORT_LATENCY_MS,
+                      cost_usd=MAX_REPORT_COST)
+    response = client.post(
+        f"/api/runs/{run_id}/live/report",
+        json={"token": pending["token"], "reports": reports},
+    )
+    assert response.status_code == 200, response.text
+    import math
+
+    assert math.isfinite(response.json()["step"]["reward"])
+    assert client.get(f"/api/runs/{run_id}").status_code == 200
+
+
+def test_aggregate_overflow_is_refused_before_state_moves(monkeypatch):
+    """Defence in depth: if per-report caps are ever bypassed, the step totals still are not.
+
+    Two latencies of 1e308 are each finite but sum to inf; the transition must refuse them
+    before touching state, rather than commit a step that cannot be serialised.
+    """
+    import dataclasses
+
+    import numpy as np
+
+    from app.orchestration import transitions
+    from app.orchestration.actions import Action
+    from app.orchestration.state import initial_state
+    from app.orchestration.transitions import TransitionModel
+
+    monkeypatch.setattr(transitions, "validate_resource_amounts", lambda **_: None)
+    rng = np.random.default_rng(5)
+    state = initial_state(task_complexity=0.5, budget_usd=2.0, latency_budget_ms=90_000.0,
+                          belief_dim=4, rng=rng)
+    agents = ["researcher", "verifier"]
+    reports = [
+        dataclasses.replace(
+            report_from_response(
+                AGENTS[agent_id], state,
+                {"outcome": "success", "confidence": 0.9, "claimed_hypothesis": 1,
+                 "response": "evidence", "tokens": 10, "latency_ms": 5.0, "cost_usd": 0.01},
+                belief_dim=4,
+            ),
+            latency_ms=1e308,
+        )
+        for agent_id in agents
+    ]
+    before = state.to_dict() if hasattr(state, "to_dict") else repr(state)
+    with pytest.raises(ValueError, match="not be finite"):
+        TransitionModel(belief_dim=4, stochasticity=0.0).sample(
+            state, Action.RUN_PARALLEL, np.random.default_rng(5),
+            agent_ids=agents, reports_override=reports,
+        )
+    after = state.to_dict() if hasattr(state, "to_dict") else repr(state)
+    assert after == before

@@ -1,0 +1,11 @@
+# Default gitleaks rules, plus one narrow exception: BibTeX-style citation keys
+# ("key": "takehi2026wsp") in the offline research corpus look like generic API keys.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Citation keys in the research corpus are not secrets"
+paths = ['''^research/seed_corpus\.json$''']
+condition = "AND"
+regexTarget = "line"
+regexes = ['''^\s*"key":\s*"[a-z]+[0-9]{4}[a-z0-9_]*",?\s*$''']

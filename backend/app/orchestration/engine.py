@@ -20,7 +20,7 @@ from .actions import (
     SPECIALIST_ACTIONS,
     Action,
 )
-from .agents import AGENTS, SOLO_AGENT
+from .agents import AGENTS, SOLO_AGENT, validate_resource_amounts
 from .live import PendingStep, build_brief, default_hypotheses
 from .policies import DEFAULT_POLICY, ExternalPolicy, Policy, create_policy
 from .rewards import RewardModel
@@ -28,6 +28,13 @@ from .state import FEATURE_DIM, OrchestratorState, initial_state
 from .transitions import AgentReport, TransitionModel, TransitionOutcome, agents_for_action
 
 ORCHESTRATOR_NODE = "orchestrator"
+
+# Gate thresholds in micro-units of 1, as the verified kernel states them (verified/src/lib.rs
+# legal_actions). run_parallel needs more than 12% of the budget and 10% of the latency left;
+# terminate opens once either is under 25%.
+PARALLEL_BUDGET_FLOOR = 120_000
+PARALLEL_LATENCY_FLOOR = 100_000
+TERMINATE_RESOURCE_FLOOR = 250_000
 
 
 @dataclass
@@ -79,6 +86,14 @@ class RunConfig:
     """The generalist must attempt the task before escalation becomes legal."""
     allow_escalation: bool = True
     """Set false for a pure solo control arm that can never orchestrate."""
+
+    def __post_init__(self) -> None:
+        validate_resource_amounts(
+            budget_usd=self.budget_usd,
+            latency_budget_ms=self.latency_budget_ms,
+            escalation_cost_usd=self.escalation_cost_usd,
+            escalation_latency_ms=self.escalation_latency_ms,
+        )
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -195,7 +210,8 @@ class OrchestrationEngine:
             return legal
 
         legal = [a for a in SPECIALIST_ACTIONS if a is not Action.RUN_PARALLEL]
-        if state.budget_remaining > 0.12 and state.latency_remaining > 0.1:
+        if (state.budget_left_vs(PARALLEL_BUDGET_FLOOR) > 0
+                and state.latency_left_vs(PARALLEL_LATENCY_FLOOR) > 0):
             legal.append(Action.RUN_PARALLEL)
         if state.step >= self.config.min_steps_before_terminate and self._may_terminate():
             legal.append(Action.TERMINATE)
@@ -210,8 +226,8 @@ class OrchestrationEngine:
         state = self.state
         return (
             state.unresolved_subtasks == 0
-            or state.budget_remaining < 0.25
-            or state.latency_remaining < 0.25
+            or state.budget_left_vs(TERMINATE_RESOURCE_FLOOR) < 0
+            or state.latency_left_vs(TERMINATE_RESOURCE_FLOOR) < 0
         )
 
     def step(self) -> StepResult:

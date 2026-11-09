@@ -7,6 +7,7 @@ from .meta import router as meta_router
 from .research import router as research_router
 from .runs import router as runs_router
 from .ws import router as ws_router
+from .wsp import router as wsp_router
 
 __all__ = [
     "experiments_router",
@@ -14,4 +15,5 @@ __all__ = [
     "research_router",
     "runs_router",
     "ws_router",
+    "wsp_router",
 ]

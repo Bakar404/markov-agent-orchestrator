@@ -6,6 +6,8 @@ description: An experiment harness that answers whether multi-agent orchestratio
 # Markov Agent Orchestrator
 
 [![CI](https://github.com/Bakar404/markov-agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/Bakar404/markov-agent-orchestrator/actions/workflows/ci.yml)
+[![Proved with Verus](https://img.shields.io/badge/kernel-proved_with_Verus-5b2c83)](verified/README.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 <div align="center">
 
@@ -48,7 +50,14 @@ flowchart LR
     C["CLI: paired experiment driver"] <-->|REST| B
     M["Bridge: Agent Framework workflows"] <-->|REST| B
     B <--> D[("SQLite: runs and research")]
+    M -->|"weight patch (LLM editor)"| W["WSP: render, calibrate, apply"]
+    W --> G{"wsp_guard: rules R1-R9"}
+    G -->|accepted| B
+    K["verified/: Verus-proved Rust kernel"] -.->|"differential test: Python == proof"| G
+    K -.->|"same check"| B
 ```
+
+Two parts of this are newer than the rest. The **weight-space programming arm** lets a language model edit the learned policy's weights directly, and the **verified kernel** proves, with Verus, the rules that every run and every such edit must obey. Both are described below.
 
 ## What this is
 
@@ -186,12 +195,57 @@ A **strategy** is a policy plus the configuration that makes it a coherent appro
 | `maf_sequential` | immediately | A chain of specialists on a cycle edge |
 | `maf_concurrent` | immediately | Fan-out to three specialists at once, then fan back in |
 | `maf_handoff` | immediately | Each agent names the next, dispatched by switch-case |
+| `wsp_markov_game` | learned, then edited | The `learned_markov_game` policy after a language model has rewritten some of its weights from a plain-language goal |
 
 The three `maf_*` arms run on actual Microsoft Agent Framework graphs: `add_chain`, `add_fan_out_edges` with `add_fan_in_edges`, and `add_switch_case_edge_group` respectively. A node cannot act on its own, because acting means suspending on `request_info` until the arena has approved the action and charged for it. `hand_rolled_*` versions of all three are kept as the reference the ports are checked against.
 
 `GET /api/meta` returns the catalog; `POST /api/runs` accepts a `strategy` id and derives the policy, its options and the arm name.
 
 `GET /api/meta/strategies/{id}/papers` returns the papers a strategy implements, drawn from the live library and reordered by overlap with its paper query. The control returns nothing and says why — it was picking up an orchestration paper purely because it shares the routing tag, and citing that beside a single-agent baseline would be wrong.
+
+## Weight-space programming: an LLM edits the policy
+
+[Sparks of Weight-Space Programming](https://rikiyat.github.io/blog/weight-space-programming/) (Takehi, Teoh, Zhang and Khattab, MIT CSAIL, November 2026) showed a general-purpose language model reading a network's raw weights and rewriting a small fraction of them, from a plain-language goal and with no gradient descent. The `markov_game` policy is a good place to test that idea, because it is small and every number in it has a name: one row of `q_weights` per agent and one column per state feature, a `synergy` term for each pair of agents, and `terminate_weights`.
+
+The `wsp_markov_game` arm does this:
+
+```mermaid
+flowchart LR
+    P["markov_game policy<br/>(checkpoint or default init)"] --> C["calibrate<br/>calibration seeds only"]
+    C --> R["render the weights<br/>as labelled tables"]
+    R --> E["editor proposes a sparse patch<br/>toward a written goal"]
+    E --> G{"wsp_guard<br/>R1-R9"}
+    G -->|rejected| X["refused, with the rule it broke"]
+    G -->|accepted| A["apply the patch<br/>and record ΔW"]
+    A --> V["evaluate like every other arm<br/>held-out seeds, against control"]
+```
+
+- **The editor.** `CopilotEditor` asks a model through the bridge's GitHub Copilot agent (`python bridge/run.py --wsp-editor copilot --wsp-model <model> --wsp-goal "..."`). `RecordedEditor` replays a saved patch, so the arm runs offline and in CI; [`wsp/examples/narrow_coalitions.json`](backend/app/orchestration/wsp/examples/narrow_coalitions.json) is the shipped example.
+- **Calibration and evaluation never share a seed.** The editor only sees diagnostics from a reserved calibration range (2,000,000,000 to 2,000,000,999), and any evaluation run given a seed in that range is refused. An edit that only works on the seeds it was written against is caught by the comparison, not hidden by it.
+- **What gets recorded.** Each run stores the patch, the guard's verdict and the same measures the paper reports: how many entries changed, the fraction of the policy's parameters that is, and the relative ‖ΔW‖<sub>F</sub> of each tensor. `GET /api/runs/{id}/wsp` returns them; `GET /api/wsp/brief` shows what an editor is given.
+- **What it does not claim.** An edit is judged by the same paired, blind comparison as every other arm. Its effect on the calibration seeds is not a result.
+
+Before any patch is applied it must pass the guard below. The guard is the one place where a language model's output becomes part of the policy, so it is the part that is proved.
+
+## The proved kernel: Proof-Driven Development
+
+[`verified/`](verified/README.md) follows the method of [PDD Kit](https://www.microsoft.com/en-us/research/blog/formally-verifying-agent-written-full-stack-web-apps-with-pdd-kit/) (Microsoft Research and GitHub Next): write the requirements down, state them as a [Verus](https://github.com/verus-lang/verus) specification, prove a Rust implementation against it, and say exactly what the proof does not reach. It covers three rules:
+
+| Rule | What is proved |
+| --- | --- |
+| **The escalation gate** (G1 to G7) | Before escalation only `invoke_generalist`, `escalate` and `terminate` can be legal; after it, never the generalist or another escalation; when `run_parallel` and `terminate` open |
+| **Budget accounting** (B1 to B7) | What's left is never negative and never above the total, spending only ever goes up, and the normalised budget stays in [0, 1] |
+| **The weight-patch guard** (R1 to R9, W1 to W6) | An accepted patch obeys every rule; a rejected one names the first rule it breaks; applying a patch keeps every shape and changes only the entries it names |
+
+The arena itself runs Python, so a [Hypothesis](https://hypothesis.readthedocs.io/) differential test feeds the same random states and patches to the Python and to the proved Rust and requires the same answer. `python verified/check.py` runs the whole chain:
+
+1. **Prove** the kernel with Verus.
+2. **Mutation check.** Plant 29 bugs, at least one per clause, and require Verus to reject each one on the clause it breaks. A clause that rejects nothing isn't checking anything.
+3. **Differential test** of Python against Rust.
+4. **Negative control.** Four deliberately wrong Python guards must each fail the differential test.
+5. **Receipt.** Write `verified/target/receipt.json` with the versions and the hashes of the proved files.
+
+CI runs the same script with a pinned, checksummed Verus release. Proving the existing gate and budget code against its own requirements also turned up a real bug: a live report with an infinite latency made the latency budget `NaN`, after which the latency stop could never fire. [verified/README.md](verified/README.md) lists that and the other findings, along with the trust boundaries: Verus, Z3 and rustc are trusted; floats are compared in fixed-point micro-units; and turning plain-language intent into clauses is a human judgment.
 
 ## User workflow
 
@@ -402,11 +456,13 @@ The MCP provider stays useful with no endpoint configured — it ranks the local
 ```text
 backend/
   app/orchestration/   State, actions, escalation, transitions, rewards, policies, strategies
+  app/orchestration/wsp/   Weight-space programming: render, calibrate, editors, apply, examples
+  app/orchestration/wsp_guard.py   The patch guard (R1-R9), tested against the proved kernel
   app/research/        Provider abstraction + arXiv / Semantic Scholar / PwC / HITS MCP
   app/api/             REST + WebSocket routers
   app/services/        Run lifecycle, experiments, spectator hub
   tools/               balance.py (policy probe across seeds)
-  tests/               135 tests
+  tests/               Mechanics, WSP arm, findings, Python == proved Rust
 bridge/
   arena_bridge/        Agent Framework driver, executor, blind judge, workflow graphs
   rubrics/             Judging rubrics, written before the runs
@@ -420,6 +476,7 @@ frontend/
   components/game/     Arena, HUD, Controls, GraphView, RewardDashboard, TraceExplorer
   components/pixel/    Sprite renderer with animation playback
   public/sprites/      98 generated PNGs plus manifest
+verified/              Verus-proved Rust kernel: gate, budget, patch guard; check.py
 docs/                  Architecture, ResearchRoadmap, DesignDecisionLog
 research/              Curated offline corpus
 scripts/               dev.ps1, fetch-sprites.ps1, run-experiment.ps1
@@ -427,17 +484,19 @@ scripts/               dev.ps1, fetch-sprites.ps1, run-experiment.ps1
 
 ## Testing and measurement
 
-```powershell
+```bash
 cd backend
-python -m pytest -q                                  # 135 tests
+python -m pytest -q                                  # mechanics, WSP arm, findings
+REQUIRE_VERIFIED=1 python -m pytest -q               # also Python == proved Rust (needs the built kernel)
 python -m tools.balance --episodes 40                # policy behaviour across seeds
+cd .. && python verified/check.py                    # prove, mutants, differential, negative control
 ```
 
 The balance harness exists because playing the game revealed what the tests could not: the win condition was originally unreachable by construction, in every episode, and nothing went red. That story is recorded in [docs/DesignDecisionLog.md](docs/DesignDecisionLog.md).
 
 ### What the tests do not cover
 
-Every test here checks *mechanics* — that snapshots round-trip, that a stale profile is refused, that the comparison refuses to rank on reward. **None of them assert that a learned policy beats the hardcoded pipeline.** The central claim is therefore untested: routing could regress arbitrarily far without a single test failing. If you want that claim defended, it has to become a test.
+Every test here checks *mechanics* — that snapshots round-trip, that a stale profile is refused, that the comparison refuses to rank on reward. The proof is about mechanics too: it shows the gate, the budget and the patch guard do what their requirements say, not that the requirements are the right ones. **None of them assert that a learned or weight-edited policy beats the hardcoded pipeline.** The central claim is therefore untested: routing could regress arbitrarily far without a single test failing. If you want that claim defended, it has to become a test.
 
 ## API surface
 

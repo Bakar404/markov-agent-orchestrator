@@ -4,6 +4,12 @@ version = "0.1.0"
 description = "Stochastic multi-agent orchestration engine with a research intelligence layer"
 requires-python = ">=3.11"
 
+[dependency-groups]
+# Test-only extras on top of requirements.txt: pip install --group dev (pip >= 25.1).
+dev = [
+    "hypothesis>=6.100",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

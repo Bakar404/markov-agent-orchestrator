@@ -16,12 +16,13 @@ states, which is the property the whole platform is built to visualize.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from .actions import SINGLE_AGENT_ACTIONS, Action
-from .agents import AGENTS, SOLO_AGENT, AgentSpec
+from .agents import AGENTS, SOLO_AGENT, AgentSpec, validate_resource_amounts
 from .entropy import belief_entropy
 from .state import OrchestratorState
 
@@ -138,12 +139,49 @@ class TransitionModel:
         escalation_cost_usd: float = 0.03,
         escalation_latency_ms: float = 900.0,
     ) -> None:
+        validate_resource_amounts(
+            escalation_cost_usd=escalation_cost_usd,
+            escalation_latency_ms=escalation_latency_ms,
+        )
         self.belief_dim = belief_dim
         self.stochasticity = float(np.clip(stochasticity, 0.05, 3.0))
         self.escalation_cost_usd = float(escalation_cost_usd)
         self.escalation_latency_ms = float(escalation_latency_ms)
 
     # ------------------------------------------------------------------ core
+    @staticmethod
+    def _check_totals(state: OrchestratorState, reports: list[AgentReport]) -> None:
+        """Refuse a step whose totals would not be finite, before any state is touched.
+
+        Each report is capped on its own, but the step adds them up and then adds the sum to
+        the run's running totals. Checking the aggregates here means an overflow is rejected
+        cleanly rather than committed and left to fail when the step is JSON-encoded.
+        """
+        costs = [float(r.cost_usd) for r in reports]
+        latencies = [float(r.latency_ms) for r in reports]
+        tokens = [int(r.tokens) for r in reports]
+        for name, values in (("cost_usd", costs), ("latency_ms", latencies), ("tokens", tokens)):
+            for value in values:
+                validate_resource_amounts(**{name: value})
+        try:
+            total_cost = math.fsum(costs)
+            max_latency = max(latencies, default=0.0)
+            latency = max_latency + 0.12 * (math.fsum(latencies) - max_latency)
+            totals = {
+                "step cost": total_cost,
+                "step latency": latency,
+                "budget spent": state.budget_spent_usd + total_cost,
+                "latency consumed": state.latency_consumed_ms + latency,
+                "tokens consumed": float(state.tokens_consumed + sum(tokens)),
+            }
+        except OverflowError as exc:
+            # fsum raises rather than returning inf, and so does float() of a huge int.
+            raise ValueError("step totals would not be finite; the report was not recorded") \
+                from exc
+        for name, value in totals.items():
+            if not math.isfinite(value):
+                raise ValueError(f"{name} would not be finite; the report was not recorded")
+
     def sample(
         self,
         state: OrchestratorState,
@@ -208,6 +246,7 @@ class TransitionModel:
             )
 
         if reports_override is not None:
+            self._check_totals(state, reports_override)
             resolved_agents = [report.agent_id for report in reports_override]
             override_by_agent = {report.agent_id: report for report in reports_override}
         else:
