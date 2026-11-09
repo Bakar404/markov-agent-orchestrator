@@ -9,9 +9,10 @@ from app.main import create_app
 @pytest.fixture(scope="module")
 def client(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("api") / "test.db"
-    import app.db as db_module
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
+    import app.db as db_module
 
     engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"check_same_thread": False})
     db_module.engine = engine

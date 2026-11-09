@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .actions import Action, SINGLE_AGENT_ACTIONS
+from .actions import SINGLE_AGENT_ACTIONS, Action
 from .agents import AGENTS, SOLO_AGENT, AgentSpec
 from .entropy import belief_entropy
 from .state import OrchestratorState

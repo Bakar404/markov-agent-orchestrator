@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
-from app.orchestration.actions import Action, SINGLE_AGENT_ACTIONS
+from app.orchestration.actions import SINGLE_AGENT_ACTIONS, Action
 from app.orchestration.engine import OrchestrationEngine, RunConfig
 from app.orchestration.policies import POLICY_REGISTRY, create_policy
 from app.orchestration.policies.fixed_sequence import DEFAULT_SEQUENCE, FixedSequencePolicy

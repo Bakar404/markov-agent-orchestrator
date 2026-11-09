@@ -12,9 +12,10 @@ from app.research.taxonomy import taxonomy_catalog
 @pytest.fixture(scope="module")
 def client(tmp_path_factory):
     db_path = tmp_path_factory.mktemp("catalog") / "test.db"
-    import app.db as db_module
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
+    import app.db as db_module
 
     engine = create_engine(
         f"sqlite:///{db_path.as_posix()}", connect_args={"check_same_thread": False}
@@ -262,7 +263,7 @@ def test_an_escalated_arm_still_gets_a_verdict(client):
 
 def seed_pairwise_experiment(client, name: str, seeds=(91, 92, 93, 94, 95)) -> dict[str, list[str]]:
     ids: dict[str, list[str]] = {"control": [], "always_orchestrate": []}
-    for strategy in ids:
+    for strategy, run_ids in ids.items():
         for seed in seeds:
             run = client.post(
                 "/api/runs",
@@ -276,7 +277,7 @@ def seed_pairwise_experiment(client, name: str, seeds=(91, 92, 93, 94, 95)) -> d
                 },
             ).json()
             client.post(f"/api/runs/{run['id']}/step", json={"steps": 8})
-            ids[strategy].append(run["id"])
+            run_ids.append(run["id"])
     return ids
 
 

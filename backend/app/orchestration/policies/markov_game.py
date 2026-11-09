@@ -18,7 +18,7 @@ from itertools import combinations
 
 import numpy as np
 
-from ..actions import ACTIONS, ACTION_INDEX, AGENT_TO_ACTION, Action
+from ..actions import ACTION_INDEX, ACTIONS, AGENT_TO_ACTION, Action
 from ..agents import AGENT_IDS, SOLO_AGENT
 from ..state import OrchestratorState
 from .base import Policy

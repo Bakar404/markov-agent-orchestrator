@@ -46,16 +46,16 @@ def policy_catalog() -> list[dict]:
 
 
 __all__ = [
-    "POLICY_REGISTRY",
     "DEFAULT_POLICY",
+    "POLICY_REGISTRY",
+    "CooperativeMarkovGamePolicy",
+    "ExternalPolicy",
+    "FixedSequencePolicy",
+    "HeuristicPolicy",
     "Policy",
-    "create_policy",
-    "policy_catalog",
-    "masked_softmax",
     "RandomPolicy",
     "SingleAgentPolicy",
-    "ExternalPolicy",
-    "HeuristicPolicy",
-    "FixedSequencePolicy",
-    "CooperativeMarkovGamePolicy",
+    "create_policy",
+    "masked_softmax",
+    "policy_catalog",
 ]

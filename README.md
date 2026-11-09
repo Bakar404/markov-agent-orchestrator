@@ -3,6 +3,10 @@ title: Markov Agent Orchestrator
 description: An experiment harness that answers whether multi-agent orchestration beats a single agent on your task, with a pixel-art arena that shows the decisions being made and paid for.
 ---
 
+# Markov Agent Orchestrator
+
+[![CI](https://github.com/Bakar404/markov-agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/Bakar404/markov-agent-orchestrator/actions/workflows/ci.yml)
+
 <div align="center">
 
 <img src="frontend/public/sprites/generalist.png" width="68" alt="Generalist" />
@@ -19,6 +23,32 @@ description: An experiment harness that answers whether multi-agent orchestratio
 Measure it against a single-agent control on the same seeds, with a blind judge.
 
 </div>
+
+## Quick start
+
+From the repository root (Python 3.11+, Node.js 20): macOS/Linux bash first, then Windows PowerShell.
+```bash
+python3 -m venv .venv && source .venv/bin/activate && pip install -r backend/requirements.txt && npm --prefix frontend ci
+(cd backend && python -m uvicorn app.main:app --reload --port 8000)
+npm --prefix frontend run dev # In a second terminal, from the repository root.
+```
+```powershell
+py -3 -m venv C:\venvs\markov-agent-orchestrator; C:\venvs\markov-agent-orchestrator\Scripts\python -m pip install -r backend/requirements.txt; npm --prefix frontend ci
+.\scripts\dev.ps1
+```
+Open <http://localhost:3000>. Simulation needs no API key. Keep the Python environment outside cloud-synced folders; see [Detailed setup](#detailed-setup) below.
+
+## Architecture
+
+The FastAPI backend owns run state, policies, persisted traces, and comparisons. The Next.js arena reads and controls runs over REST and watches updates over WebSocket. The CLI and the separate Microsoft Agent Framework bridge drive experiments through the backend's REST API; neither routes requests through the other or serves the frontend.
+
+```mermaid
+flowchart LR
+    F["Frontend: Next.js arena"] <-->|REST + WebSocket| B["Backend: FastAPI"]
+    C["CLI: paired experiment driver"] <-->|REST| B
+    M["Bridge: Agent Framework workflows"] <-->|REST| B
+    B <--> D[("SQLite: runs and research")]
+```
 
 ## What this is
 
@@ -193,7 +223,7 @@ Explore in simulation, confirm live. A live step costs real time and credits, so
 * **Traces** — every step, expandable into the policy's action distribution, the reward breakdown, the state transition and the real agent output in live mode.
 * **Research Library** — 43 curated papers, 81 citation edges, a nine-category taxonomy, and live search across arXiv, Semantic Scholar, Papers With Code and an MCP tool provider.
 
-## Quick start
+## Detailed setup
 
 The Python environment must live **outside** any cloud-synced folder. A venv inside OneDrive or Dropbox syncs tens of thousands of files and trips data-loss scanners on pip's vendored CA bundle.
 

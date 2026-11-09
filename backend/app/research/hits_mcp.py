@@ -92,7 +92,7 @@ class HITSMCPResearchProvider(ResearchProvider):
                 self.settings.hits_mcp_tool, {"query": query, "limit": limit}
             )
             papers = self._normalize(payload, query, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001  # Preserve local fallback for MCP errors.
             return self._local_hits(query, limit, started, f"{type(exc).__name__}: {exc}")
 
         if not papers:
@@ -127,7 +127,7 @@ class HITSMCPResearchProvider(ResearchProvider):
             payload = await self._rpc("tools/list", {})
             tools = [t.get("name") for t in (payload.get("tools") or [])]
             base.update({"available": True, "mode": "mcp", "tools": tools})
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001  # Report MCP errors with local health status.
             base.update({"available": True, "mode": "local-hits", "error": str(exc)})
         return base
 

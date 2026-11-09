@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from app.orchestration.actions import ACTIONS, Action, SPECIALIST_ACTIONS
+from app.orchestration.actions import ACTIONS, SPECIALIST_ACTIONS, Action
 from app.orchestration.agents import AGENTS, SOLO_AGENT
 from app.orchestration.engine import OrchestrationEngine, RunConfig
 from app.orchestration.state import FEATURE_NAMES, initial_state

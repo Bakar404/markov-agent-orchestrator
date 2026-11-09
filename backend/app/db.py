@@ -33,7 +33,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 if _settings.database_url.startswith("sqlite"):
 
     @event.listens_for(engine, "connect")
-    def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:  # noqa: ANN001
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
