@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import logging
+import math
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .api import (
     experiments_router,
@@ -14,6 +18,7 @@ from .api import (
     research_router,
     runs_router,
     ws_router,
+    wsp_router,
 )
 from .config import get_settings
 from .db import init_db, session_scope
@@ -49,6 +54,15 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        # Rejected NaN/Infinity inputs must not break JSON serialization of the 422 itself.
+        detail = jsonable_encoder(
+            exc.errors(),
+            custom_encoder={float: lambda x: x if math.isfinite(x) else str(x)},
+        )
+        return JSONResponse(status_code=422, content={"detail": detail})
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origins) or ["*"],
@@ -62,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(research_router)
     app.include_router(experiments_router)
     app.include_router(ws_router)
+    app.include_router(wsp_router)
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:

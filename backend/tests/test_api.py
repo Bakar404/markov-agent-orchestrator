@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -41,7 +43,8 @@ def test_meta_exposes_agents_actions_and_policies(client):
         "fixed_sequence",
         "markov_game",
     }
-    assert len(payload["taxonomy"]) == 9
+    assert len(payload["taxonomy"]) == 10
+    assert "Weight-Space Programming" in {c["name"] for c in payload["taxonomy"]}
 
 
 def test_run_lifecycle(client):
@@ -174,3 +177,72 @@ def test_websocket_streams_steps(client):
         assert event["type"] == "step"
         assert event["step"]["step"] == 1
         ws.send_json({"type": "close"})
+
+
+def test_websocket_reset_validates_the_seed(client):
+    run_id = client.post(
+        "/api/runs",
+        json={"task": "Reset over the socket", "policy": "markov_game", "seed": 5, "max_steps": 6},
+    ).json()["id"]
+    band = 2_000_000_003
+    with client.websocket_connect(f"/ws/runs/{run_id}") as ws:
+        assert ws.receive_json()["type"] == "snapshot"
+        for seed in (True, 1.5, "7", -1, 2**31, 2**80, band):
+            ws.send_json({"type": "reset", "seed": seed})
+            event = ws.receive_json()
+            assert event["type"] == "error", (seed, event)
+        # The socket survived every refusal and a valid reset still works.
+        ws.send_json({"type": "reset", "seed": 9})
+        event = ws.receive_json()
+        assert event["type"] == "snapshot"
+        assert event["run"]["config"]["seed"] == 9
+        ws.send_json({"type": "close"})
+
+
+def test_calibration_band_is_refused_for_every_run(client):
+    body = {"task": "A plain run", "policy": "markov_game", "max_steps": 4}
+    refused = client.post("/api/runs", json={**body, "seed": 2_000_000_000})
+    assert refused.status_code == 400
+    assert "calibration" in refused.json()["detail"]
+    run_id = client.post("/api/runs", json={**body, "seed": 4}).json()["id"]
+    reset = client.post(f"/api/runs/{run_id}/reset", json={"seed": 2_000_000_999})
+    assert reset.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"task_shape": {"needs_evidence": float("nan")}},
+        {"task_shape": {"needs_evidence": float("inf")}},
+        {"task_shape": {"needs_evidence": True}},
+        {"task_shape": {"needs_evidence": 10**400}},
+        {"policy_options": {"temperature": float("nan")}},
+        {"policy_options": {"learning_rate": float("inf")}},
+        {"policy_options": {"discount": True}},
+        {"policy_options": {"temperature": 10**400}},
+        {"policy_options": {"extra": {"nested": [1.0, float("nan")]}}},
+    ],
+)
+def test_non_finite_run_config_is_refused_before_the_run_exists(client, extra):
+    before = len(client.get("/api/runs").json())
+    response = client.post(
+        "/api/runs",
+        content=json.dumps({"task": "Bad numbers", "policy": "markov_game", "seed": 3, **extra}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422, response.text
+    assert len(client.get("/api/runs").json()) == before
+
+
+def test_huge_patch_value_is_a_400_not_a_500(client):
+    edit = {"tensor": "q_weights", "index": [6, 0], "value": 10**400}
+    patch = {"goal": "anything at all", "rationale": "r", "edits": [edit]}
+    provenance = {"base_sha256": "0" * 64, "calibration_seeds": [2_000_000_000]}
+    response = client.post(
+        "/api/runs",
+        content=json.dumps({"task": "Huge", "strategy": "wsp_markov_game", "seed": 3,
+                            "wsp_patch": patch, "wsp_provenance": provenance}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 400, response.text
+    assert "finite" in response.json()["detail"]

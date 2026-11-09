@@ -1,0 +1,31 @@
+[package]
+name = "markov-verified"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The escalation gate, budget accounting and WSP weight-patch guard, proved with Verus."
+license = "MIT"
+
+[lib]
+name = "markov_verified"
+path = "src/lib.rs"
+
+# The differential harness's native CLI: JSON lines in on stdin, JSON lines out.
+[[bin]]
+name = "verified-kernel"
+path = "src/main.rs"
+
+# Pinned to the Verus release that proves src/lib.rs (0.2026.11.02.8bf68ee).
+# A plain cargo build erases every spec and proof, so the binary carries only
+# the executable code Verus checked, plus the trusted shim in src/main.rs.
+[dependencies]
+vstd = "=0.0.0-2026-11-01-0251"
+verus_builtin = "=0.0.0-2026-11-01-0251"
+verus_builtin_macros = "=0.0.0-2026-11-01-0251"
+# Only the trusted shim (src/main.rs) uses it; Verus never sees it.
+serde_json = "=1.0.145"
+
+[profile.release]
+codegen-units = 1
+
+[workspace]

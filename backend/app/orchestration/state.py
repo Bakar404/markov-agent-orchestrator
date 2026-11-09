@@ -12,6 +12,7 @@ import numpy as np
 
 from .agents import AGENT_SPECS
 from .entropy import belief_entropy, confidence_from_belief, normalize, normalized_entropy
+from .wsp_guard import MICRO, MICRO_MAX, quantize
 
 FEATURE_NAMES: tuple[str, ...] = (
     "bias",
@@ -33,6 +34,31 @@ FEATURE_NAMES: tuple[str, ...] = (
     "stall",
 )
 FEATURE_DIM = len(FEATURE_NAMES)
+
+
+def _micro(amount: float) -> int:
+    q = quantize(amount)
+    if q is None:  # inf saturates like an overflowing finite amount; NaN reads as nothing
+        return MICRO_MAX if amount > 0 else -MICRO_MAX if amount < 0 else 0
+    return q
+
+
+def compare_remaining(total: float, spent: float, threshold: int) -> int:
+    """Sign of (fraction of ``total`` left after ``spent``) − ``threshold`` / 1e6.
+
+    This is the comparison the verified kernel proves (``above``/``below`` in verified/src/
+    lib.rs): both amounts are quantised to micro-units first, then compared as exact integers.
+    Comparing the float ratio instead lets an off-grid amount land either side of a threshold
+    the kernel decides the other way (total 1, spent 0.8799996 is exactly 12% left in micro-
+    units, but 0.1200004 as a float), and the Python is what runs, so it has to match the proof.
+    """
+    qt, qs = _micro(total), _micro(spent)
+    rem = max(qt - qs, 0)
+    if qt > 0:
+        lhs, rhs = rem * MICRO, threshold * qt
+    else:
+        lhs, rhs = (MICRO if rem > 0 else 0), threshold
+    return (lhs > rhs) - (lhs < rhs)
 
 # The last three describe the *shape* of the task rather than episode progress. Without them
 # every task looks identical at step 0 — uniform belief, full budget, zero quality — so the
@@ -171,6 +197,14 @@ class OrchestratorState:
     def latency_remaining(self) -> float:
         remaining = max(self.latency_budget_ms - self.latency_consumed_ms, 0.0)
         return float(np.clip(remaining / max(self.latency_budget_ms, 1e-9), 0.0, 1.0))
+
+    def budget_left_vs(self, threshold: int) -> int:
+        """:func:`compare_remaining` for the budget; ``threshold`` in micro-units of 1."""
+        return compare_remaining(self.budget_total_usd, self.budget_spent_usd, threshold)
+
+    def latency_left_vs(self, threshold: int) -> int:
+        """:func:`compare_remaining` for the latency allowance."""
+        return compare_remaining(self.latency_budget_ms, self.latency_consumed_ms, threshold)
 
     @property
     def unresolved_ratio(self) -> float:

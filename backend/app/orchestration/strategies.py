@@ -33,10 +33,18 @@ class Strategy:
     Worth surfacing rather than burying in the policy id: a reader comparing arms should be able
     to see which ones the arena decided and which ones it only recorded."""
     policy_options: dict | None = None
+    programming: dict | None = None
+    """How the arm's starting weights are produced before evaluation, when not by training.
+
+    ``{"method": "wsp", ...}`` marks a weight-space-programmed arm: an editor rewrites a
+    checkpoint's weights toward ``goal`` after calibrating on reserved seeds (see
+    :mod:`app.orchestration.wsp`). ``editor`` is ``recorded`` (replay ``patch``, a shipped
+    example name) or ``copilot``."""
 
     def to_dict(self) -> dict:
         payload = asdict(self)
         payload["policy_options"] = self.policy_options or {}
+        payload["programming"] = self.programming or {}
         return payload
 
 
@@ -102,6 +110,31 @@ STRATEGIES: tuple[Strategy, ...] = (
         ),
         category="Stochastic Games",
         paper_query="stochastic game cooperative equilibrium",
+    ),
+    Strategy(
+        id="wsp_markov_game",
+        label="Weight-Space Programmed Markov Game",
+        policy="markov_game",
+        summary=(
+            "The Cooperative Markov Game, but its starting weights are written rather than "
+            "trained: an LLM reads the raw tensors and edits them toward a stated goal, and a "
+            "guard vets every edit before it lands."
+        ),
+        when=(
+            "When you can say what the router should do but have no reward signal to train it "
+            "on. Calibrates on reserved seeds only, so the edit never sees the evaluation set."
+        ),
+        category="Weight-Space Programming",
+        paper_query="Sparks of Weight-Space Programming",
+        programming={
+            "method": "wsp",
+            "goal": (
+                "Escalate only when the generalist has stalled and the remaining hypotheses "
+                "justify the coalition's cost; prefer the narrowest coalition that resolves them"
+            ),
+            "editor": "recorded",
+            "patch": "narrow_coalitions",
+        },
     ),
     Strategy(
         id="maf_sequential",

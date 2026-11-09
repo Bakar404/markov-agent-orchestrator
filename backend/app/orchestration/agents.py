@@ -7,7 +7,44 @@ prior competence, and how strongly the agent sharpens (or blurs) the belief dist
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
+
+MAX_REPORT_COST = 1e8
+"""Cap on one measured cost, in the run's cost unit. Five times the largest budget ceiling
+(20M tokens), so no real invocation reaches it; a value past it is a unit mix-up or an attack."""
+MAX_REPORT_LATENCY_MS = 1e9
+"""Cap on one measured latency: about 11.6 days, far past any agent timeout."""
+MAX_REPORT_TOKENS = 10**12
+"""Cap on one measured token count. Well inside SQLite's signed 64-bit integer."""
+
+RESOURCE_CAPS: dict[str, float] = {
+    "cost_usd": MAX_REPORT_COST,
+    "latency_ms": MAX_REPORT_LATENCY_MS,
+    "tokens": MAX_REPORT_TOKENS,
+}
+"""Upper bounds for measured amounts. Every one is finite, and a step's sum over the at most
+eight reports a step accepts stays finite too, so a report can't overflow the reward or the
+spend to infinity."""
+
+
+def validate_resource_amounts(**amounts: float) -> None:
+    for name, value in amounts.items():
+        if isinstance(value, bool):
+            # ValueError like every other bad amount: callers turn it into a clean 422.
+            raise ValueError(f"{name} must be a number, not a boolean")  # noqa: TRY004
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            # An int too large for a float (10**400) can't be finite in any useful sense.
+            finite = False
+        except TypeError as exc:
+            raise ValueError(f"{name} must be a number") from exc
+        if not finite or value < 0:
+            raise ValueError(f"{name} must be finite and non-negative")
+        cap = RESOURCE_CAPS.get(name)
+        if cap is not None and value > cap:
+            raise ValueError(f"{name} {value:.6g} exceeds the cap of {cap:.6g}")
 
 
 @dataclass(frozen=True)
@@ -32,6 +69,13 @@ class AgentSpec:
     memory_gain: float
     subtask_resolution: float
     canvas_position: tuple[float, float]
+
+    def __post_init__(self) -> None:
+        validate_resource_amounts(
+            base_cost_usd=self.base_cost_usd,
+            base_latency_ms=self.base_latency_ms,
+            base_tokens=self.base_tokens,
+        )
 
 
 AGENT_SPECS: tuple[AgentSpec, ...] = (

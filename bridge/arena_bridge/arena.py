@@ -43,6 +43,12 @@ class Arena:
     def create_run(self, **payload: Any) -> dict:
         return self._request("POST", "/api/runs", json=payload)
 
+    def wsp_brief(self, **params: Any) -> dict:
+        return self._request("GET", "/api/wsp/brief", params=params)
+
+    def strategies(self) -> list[dict]:
+        return self._request("GET", "/api/meta")["strategies"]
+
     def open_step(self, run_id: str, declared: dict | None = None) -> dict:
         return self._request("POST", f"/api/runs/{run_id}/live/open", json=declared)
 

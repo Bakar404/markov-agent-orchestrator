@@ -17,12 +17,13 @@ emerge from agreement between independent agents rather than from an oracle.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
 from .actions import Action
-from .agents import AGENTS, AgentSpec
+from .agents import AGENTS, AgentSpec, validate_resource_amounts
 from .state import OrchestratorState
 from .transitions import OUTCOMES, AgentReport
 
@@ -155,7 +156,17 @@ def report_from_response(
     if outcome not in OUTCOMES:
         raise ValueError(f"outcome must be one of {OUTCOMES}, got '{outcome}'")
 
-    confidence = float(np.clip(float(payload.get("confidence", 0.5)), 0.0, 1.0))
+    raw_confidence = payload.get("confidence", 0.5)
+    try:
+        if isinstance(raw_confidence, bool):
+            raise TypeError
+        confidence = float(raw_confidence)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("confidence must be a number in [0, 1]") from exc
+    if not math.isfinite(confidence):
+        # NaN would slip through the clip below and poison the evidence mass.
+        raise ValueError("confidence must be finite")
+    confidence = float(np.clip(confidence, 0.0, 1.0))
 
     claimed = payload.get("claimed_hypothesis")
     if claimed is None:
@@ -164,7 +175,12 @@ def report_from_response(
         claimed_index = int(np.argmax(state.belief_probabilities))
         confidence = min(confidence, 0.15)
     else:
-        claimed_index = int(claimed)
+        try:
+            if isinstance(claimed, bool):
+                raise TypeError
+            claimed_index = int(claimed)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("claimed_hypothesis must be an integer index") from exc
         if not 0 <= claimed_index < belief_dim:
             raise ValueError(f"claimed_hypothesis {claimed_index} outside [0, {belief_dim})")
 
@@ -180,15 +196,26 @@ def report_from_response(
 
     reported_tokens = payload.get("tokens")
     reported_cost = payload.get("cost_usd")
+    reported_latency = payload.get("latency_ms")
     metered = reported_tokens is not None and reported_cost is not None
 
-    tokens = int(max(reported_tokens or spec.base_tokens, 1))
-    latency_ms = float(max(payload.get("latency_ms") or spec.base_latency_ms, 0.0))
+    validate_resource_amounts(**{
+        name: value for name, value in (
+            ("tokens", reported_tokens),
+            ("latency_ms", reported_latency),
+            ("cost_usd", reported_cost),
+        ) if value is not None
+    })
+    if reported_tokens is not None and int(reported_tokens) != reported_tokens:
+        raise ValueError("tokens must be a whole number")
+    tokens = int(spec.base_tokens if reported_tokens is None else reported_tokens)
+    latency_ms = float(spec.base_latency_ms if reported_latency is None else reported_latency)
     cost_usd = reported_cost
     if cost_usd is None:
         # Derive from measured tokens at the agent's configured rate.
         cost_usd = spec.base_cost_usd * (tokens / max(spec.base_tokens, 1))
-    cost_usd = float(max(cost_usd, 0.0))
+    cost_usd = float(cost_usd)
+    validate_resource_amounts(cost_usd=cost_usd)
 
     evidence_mass = spec.evidence_strength * OUTCOME_SCALE[outcome] * (0.4 + 0.6 * confidence)
 

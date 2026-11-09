@@ -31,7 +31,7 @@ def service(session: Session = Depends(get_session)) -> RunService:
 def create_run(payload: RunCreate, svc: RunService = Depends(service)) -> dict:
     try:
         return svc.create(payload)
-    except ValueError as exc:
+    except (ValueError, OverflowError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -59,7 +59,7 @@ def step_run(
         results = svc.step_many(run_id, steps)
     except RunNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
+    except (ValueError, OverflowError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"run": svc.detail(run_id), "steps": results}
 
@@ -79,7 +79,7 @@ def live_open(
         return svc.live_open(run_id, declared)
     except RunNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
+    except (ValueError, OverflowError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -96,7 +96,7 @@ def live_report(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ValueError as exc:
+    except (ValueError, OverflowError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     detail = svc.detail(run_id)
@@ -165,6 +165,23 @@ def reset_run(
         )
     except RunNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, OverflowError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{run_id}/wsp")
+def weight_patch(run_id: str, svc: RunService = Depends(service)) -> dict:
+    """The weight-space-programming artifact: patch, guard verdict, edit metrics, calibration.
+
+    404 for runs whose weights were not programmed.
+    """
+    try:
+        artifact = svc.weight_patch(run_id)
+    except RunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if artifact is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' has no weight patch")
+    return artifact
 
 
 @router.post("/{run_id}/status")

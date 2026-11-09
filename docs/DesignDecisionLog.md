@@ -356,3 +356,27 @@ The part worth carrying forward is why nobody noticed. `test_generalist_is_exclu
 
 Restoring the old behaviour in a sandbox puts a number on it. Across seeds 101 to 120 the policy forms 62 coalitions, and **16 of them contained the generalist**, spread over five separate seeds. The defect was not rare or marginal; it was one coalition in four, and a single-seed test simply never looked. The test now sweeps those twenty seeds and additionally asserts that a coalition formed at all, so the vacuous pass that hid this is itself a failure.
 
+
+## DDL-027: add a weight-space programming arm, and keep its calibration seeds out of every comparison
+
+*Sparks of Weight-Space Programming* (Takehi, Teoh, Zhang and Khattab, MIT CSAIL, November 2026) showed a language model reading a network's raw weights and rewriting a sparse subset of them from a plain-language goal, with no gradients. `markov_game` is a fair test of that idea here because it is small and every weight is named: an agent and a state feature for each `q_weights` entry, a pair of agents for each `synergy` entry, a feature for each `terminate_weights` entry. The `wsp_markov_game` arm renders those tensors as labelled tables, gives an editor diagnostics from calibration episodes and a goal, and applies the sparse patch it returns.
+
+The decision that matters is the seed split. The editor sees only episodes drawn from a reserved range, 2,000,000,000 to 2,000,000,999, and the run service refuses any evaluation seed inside it. Without that, an edit tuned to the seeds it was written against would show up as a win on those same seeds, which is overfitting the comparison was built to expose.
+
+Rejected: letting the editor see evaluation diagnostics "just for the goal". It would make the arm's result depend on what it was shown, which no other arm gets.
+
+Rejected: scoring the change by the fraction of *stored* entries. The policy reads `synergy[i, j]` only for `i < j`, so counting the whole square matrix overstates how little was touched. The headline fraction is over the parameters the policy reads; the raw fraction is kept next to it.
+
+The arm makes no claim on its own. Its effect on the calibration seeds is a diagnostic, and its result is whatever the paired, blind comparison against `control` says.
+
+## DDL-028: prove the gate, the budget and the patch guard, and test the Python against the proof
+
+A weight patch is the one place where a language model's output becomes part of the policy, so the rule that admits a patch should be the most trustworthy code in the repository. The escalation gate and the budget arithmetic sit under every arm's numbers, so they come next.
+
+`verified/` follows Proof-Driven Development as in Microsoft Research and GitHub Next's PDD Kit: requirements in plain language, a Verus specification with one tagged clause per requirement, a Rust implementation proved against it, and stated trust boundaries for what the proof doesn't reach. The arena still runs the Python. A Hypothesis differential test ties the two together, a mutation check shows every clause rejects a planted bug, and a negative control shows the differential test catches a wrong Python guard.
+
+Rejected: shipping the proved Rust as the implementation through bindings. The Python stays the code that runs, so the proof, the mutants and the differential test have to hold together, and CI fails if any of them stops holding.
+
+Rejected: proving over floats. The kernel compares fixed-point micro-units, and the Python quantises the same way before every comparison, so the two agree exactly. The cost is a stated trust boundary at exact ties, where the float the Python computes for a percentage can fall on either side.
+
+Writing the requirements down found a real defect in code nobody was looking at. A live report with an infinite latency made `latency_consumed_ms` `NaN`, and since `NaN >= budget` is false, the latency stop and the latency side of the terminate and `run_parallel` checks could never fire again (the budget and completed-work triggers still could). Live reports are now validated finite, non-negative and bounded at the boundary, the step totals are checked finite before a step is committed, and the regression tests that pinned the bug now pass.

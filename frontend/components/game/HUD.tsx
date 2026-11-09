@@ -122,6 +122,30 @@ export function HUD() {
         </div>
       ) : null}
 
+      {/* Weight-space programming: how much of the policy the editor rewrote. */}
+      {run.wsp ? (
+        <div className="border-2 border-edge bg-ink px-2 py-2">
+          <div className="flex items-baseline justify-between">
+            <p className="stat-label">Weight patch</p>
+            <span className="font-mono text-3xs text-mist">{run.wsp.editor}</span>
+          </div>
+          <p className="mt-1 font-mono text-2xs tabular-nums text-amber">
+            {run.wsp.changed_entries} entries · {run.wsp.changed_pct.toFixed(2)}% changed
+          </p>
+          <ul className="mt-1 space-y-0.5 font-mono text-3xs tabular-nums text-mist">
+            {Object.entries(run.wsp.per_tensor).map(([name, t]) => (
+              <li key={name} className="flex justify-between gap-2">
+                <span>{name}</span>
+                <span>
+                  ‖ΔW‖ {t.dw_fro.toFixed(3)}
+                  {t.relative_dw_fro != null ? ` (${(t.relative_dw_fro * 100).toFixed(1)}%)` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {run.terminated ? (
         <div className="border-2 border-crimson bg-ink px-2 py-2 text-center">
           <p className="font-pixel text-2xs text-crimson">GAME OVER</p>
